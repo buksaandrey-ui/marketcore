@@ -1,0 +1,302 @@
+/* ─── Supply Forecast ────────────────────────────────────────────────────── */
+
+.sf-page {
+  padding: 24px 28px 48px;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sf-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sf-title    { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+.sf-subtitle { font-size: 13px; color: #64748b; margin: 0; }
+
+.sf-season-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 16px;
+}
+.sf-sb-label  { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; }
+.sf-sb-coeff  { font-size: 22px; font-weight: 700; }
+.sf-sb-coeff.hot     { color: #ea580c; }
+.sf-sb-coeff.cold    { color: #3b82f6; }
+.sf-sb-coeff.neutral { color: #16a34a; }
+
+/* ── Сводные карточки ────────────────────────────────────────────────────── */
+
+.sf-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+@media (max-width: 800px) { .sf-summary { grid-template-columns: 1fr 1fr; } }
+
+.sf-sum-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.sf-sum-card.critical { border-color: #fecaca; background: #fef2f2; }
+.sf-sum-card.soon     { border-color: #fde68a; background: #fffbeb; }
+.sf-sum-card.overstock{ border-color: #bfdbfe; background: #eff6ff; }
+.sf-sum-card.total    { border-color: #d1fae5; background: #ecfdf5; }
+
+.sf-sum-num   { font-size: 28px; font-weight: 700; color: #0f172a; line-height: 1; }
+.sf-sum-label { font-size: 12px; color: #64748b; }
+
+/* ── Настройки ───────────────────────────────────────────────────────────── */
+
+.sf-controls {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-end;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.sf-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+.sf-control-group label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sf-ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sf-ctrl-row input[type=range] { flex: 1; accent-color: #38bdf8; cursor: pointer; }
+.sf-ctrl-val { font-size: 13px; font-weight: 700; color: #0f172a; min-width: 44px; }
+
+.sf-search {
+  padding: 7px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+  width: 200px;
+  transition: border-color 0.15s;
+}
+.sf-search:focus { border-color: #38bdf8; }
+
+.sf-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+.sf-filter-tab {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.sf-filter-tab:hover  { border-color: #94a3b8; color: #0f172a; }
+.sf-filter-tab.active { background: #0f172a; color: #f8fafc; border-color: #0f172a; }
+
+/* ── Таблица ─────────────────────────────────────────────────────────────── */
+
+.sf-table-wrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  overflow: hidden;
+}
+
+.sf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  overflow-x: auto;
+  display: block;
+}
+
+.sf-table thead tr { background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+.sf-table th {
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.sf-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.sf-row:last-child td { border-bottom: none; }
+.sf-row:hover td { background: #f8fafc; }
+
+/* Левый акцент по статусу */
+.sf-row-critical td:first-child { border-left: 3px solid #ef4444; }
+.sf-row-soon     td:first-child { border-left: 3px solid #f59e0b; }
+.sf-row-ok       td:first-child { border-left: 3px solid #22c55e; }
+.sf-row-overstock td:first-child{ border-left: 3px solid #3b82f6; }
+
+.sf-col-name { min-width: 200px; }
+.sf-sku-name { font-weight: 500; color: #0f172a; line-height: 1.3; }
+.sf-sku-id   { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+.sf-num  { text-align: right; white-space: nowrap; color: #334155; font-variant-numeric: tabular-nums; }
+.sf-num.zero { color: #ef4444; font-weight: 700; }
+.sf-num.low  { color: #f59e0b; font-weight: 600; }
+
+.sf-adj { position: relative; }
+.sf-coeff-tag {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  color: #94a3b8;
+  background: #f1f5f9;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.sf-days-critical { color: #dc2626; font-weight: 700; }
+.sf-days-soon     { color: #d97706; font-weight: 600; }
+.sf-days-ok       { color: #334155; }
+.sf-days-overstock{ color: #3b82f6; }
+
+.sf-order.needed  { color: #16a34a; font-weight: 700; }
+
+/* Бейджи */
+.sf-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sf-badge-critical { background: #fee2e2; color: #dc2626; }
+.sf-badge-soon     { background: #fef9c3; color: #a16207; }
+.sf-badge-ok       { background: #dcfce7; color: #16a34a; }
+.sf-badge-overstock{ background: #dbeafe; color: #1d4ed8; }
+
+.sf-empty  { text-align: center; color: #94a3b8; padding: 32px !important; }
+.sf-footer {
+  padding: 10px 20px;
+  font-size: 11px;
+  color: #94a3b8;
+  border-top: 1px solid #f1f5f9;
+  background: #fafafa;
+}
+
+/* ── Сезонный календарь ──────────────────────────────────────────────────── */
+
+.season-calendar {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.season-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 14px;
+}
+
+.season-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 6px;
+  align-items: end;
+}
+@media (max-width: 700px) { .season-grid { grid-template-columns: repeat(6, 1fr); } }
+
+.season-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  border: 1px solid #f1f5f9;
+  background: #f8fafc;
+  transition: transform 0.15s;
+}
+.season-cell:hover { transform: translateY(-2px); }
+.season-cell.current { border-color: #38bdf8; background: #f0f9ff; }
+
+.season-cell.hot     { background: #fff7ed; border-color: #fed7aa; }
+.season-cell.warm    { background: #f0fdf4; border-color: #bbf7d0; }
+.season-cell.cold    { background: #eff6ff; border-color: #bfdbfe; }
+.season-cell.neutral { background: #f8fafc; border-color: #e2e8f0; }
+
+.season-month { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; }
+.season-coeff { font-size: 11px; font-weight: 700; color: #0f172a; }
+
+.season-bar {
+  width: 100%;
+  height: 32px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.season-bar-fill {
+  width: 100%;
+  background: linear-gradient(to top, #38bdf8, #7dd3fc);
+  border-radius: 3px;
+  transition: height 0.3s;
+}
+.season-cell.hot  .season-bar-fill { background: linear-gradient(to top, #f97316, #fb923c); }
+.season-cell.cold .season-bar-fill { background: linear-gradient(to top, #3b82f6, #60a5fa); }
+
+.season-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.sl { font-size: 11px; color: #475569; }
+.sl.hot     { color: #ea580c; }
+.sl.warm    { color: #16a34a; }
+.sl.cold    { color: #3b82f6; }
+.sl.neutral { color: #64748b; }

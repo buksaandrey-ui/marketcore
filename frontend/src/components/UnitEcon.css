@@ -1,0 +1,284 @@
+/* ─── Unit Economics ─────────────────────────────────────────────────────── */
+
+.ue-page {
+  padding: 24px 28px 48px;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.ue-header { margin-bottom: 20px; }
+.ue-title  { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+.ue-subtitle { font-size: 13px; color: #64748b; margin: 0; }
+
+.ue-body {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) { .ue-body { grid-template-columns: 1fr; } }
+
+/* ── Левая панель ──────────────────────────────────────────────────────────── */
+
+.ue-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ue-section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.ue-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+
+.ue-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+
+.ue-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ue-field.full { grid-column: 1 / -1; }
+
+.ue-field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.ue-hint { font-weight: 400; color: #94a3b8; }
+
+.ue-input, .ue-select, .ue-select-sm {
+  padding: 7px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ue-input:focus, .ue-select:focus, .ue-select-sm:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56,189,248,0.12);
+}
+
+.ue-platform-tabs {
+  display: flex;
+  gap: 6px;
+}
+.ue-platform-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #0f172a;
+  color: #f8fafc;
+  cursor: pointer;
+}
+.ue-platform-tab.disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.ue-tax-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ue-tax-tab {
+  padding: 7px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.ue-tax-tab:hover  { border-color: #94a3b8; }
+.ue-tax-tab.active { background: #0f172a; color: #f8fafc; border-color: #0f172a; }
+
+.ue-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ue-slider-wrap input[type=range] {
+  flex: 1;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+.ue-slider-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  min-width: 36px;
+  text-align: right;
+}
+
+/* ── Правая панель ─────────────────────────────────────────────────────────── */
+
+.ue-results {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Метрики */
+.ue-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+@media (max-width: 700px) { .ue-metrics { grid-template-columns: 1fr 1fr; } }
+
+.ue-metric {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.ue-metric.ok      { border-color: #bbf7d0; background: #f0fdf4; }
+.ue-metric.warn    { border-color: #fde68a; background: #fffbeb; }
+.ue-metric.bad     { border-color: #fecaca; background: #fef2f2; }
+.ue-metric.neutral { border-color: #e0e7ff; background: #eef2ff; }
+
+.ue-metric-label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; }
+.ue-metric-value { font-size: 20px; font-weight: 700; color: #0f172a; line-height: 1.2; }
+
+/* Водопад */
+.ue-waterfall-wrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-row {
+  display: grid;
+  grid-template-columns: 220px 1fr 100px 60px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+.wf-row.wf-total {
+  border-top: 2px solid #e2e8f0;
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.wf-label {
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wf-total .wf-label { font-weight: 700; color: #0f172a; }
+
+.wf-bar-wrap {
+  background: #f1f5f9;
+  border-radius: 3px;
+  height: 16px;
+  overflow: hidden;
+}
+.wf-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  min-width: 3px;
+}
+
+.wf-value {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.wf-value.pos { color: #16a34a; }
+.wf-value.neg { color: #dc2626; }
+.wf-total .wf-value { font-size: 14px; font-weight: 700; }
+
+.wf-pct {
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Точка безубыточности */
+.ue-breakeven {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.ue-be-label { font-size: 12px; color: #64748b; flex: 1; }
+.ue-be-value { font-size: 22px; font-weight: 700; color: #0f172a; white-space: nowrap; }
+.ue-be-sub   { font-size: 12px; color: #475569; flex: 1; text-align: right; }
+
+/* Условия */
+.ue-conditions {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+.ue-cond-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 10px;
+}
+.ue-cond-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+  color: #475569;
+}
+.ue-cond-row:last-child { border-bottom: none; }
+.ue-cond-row b { color: #0f172a; }

@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketcore.io/schemas/bidding-rule/v1.json",
+  "title": "BiddingRule",
+  "type": "object",
+  "required": ["rule_id", "name", "version", "scope", "schedule", "when", "then"],
+  "additionalProperties": false,
+  "properties": {
+    "rule_id":  { "type": "string", "pattern": "^[a-z0-9_]{3,64}$" },
+    "name":     { "type": "string", "minLength": 1, "maxLength": 120 },
+    "version":  { "type": "integer", "minimum": 1 },
+    "priority": { "type": "integer", "minimum": 0, "maximum": 1000, "default": 100 },
+    "dry_run":  { "type": "boolean", "default": false },
+    "enabled":  { "type": "boolean", "default": true },
+    "scope":    { "$ref": "#/$defs/scope" },
+    "schedule": { "$ref": "#/$defs/schedule" },
+    "when":     { "$ref": "#/$defs/condition" },
+    "then":     { "$ref": "#/$defs/action" },
+    "guardrails": { "$ref": "#/$defs/guardrails" }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "required": ["platform", "account_id"],
+      "properties": {
+        "platform":    { "enum": ["wb", "ozon"] },
+        "account_id":  { "type": "string", "format": "uuid" },
+        "campaign_ids":{ "type": "array", "items": { "type": "integer" } },
+        "sku_ids":     { "type": "array", "items": { "type": "string" } },
+        "sku_filter":  {
+          "type": "object",
+          "properties": {
+            "categories":      { "type": "array", "items": { "type": "string" } },
+            "tags":            { "type": "array", "items": { "type": "string" } },
+            "min_stock":       { "type": "integer", "minimum": 0 },
+            "min_revenue_7d":  { "type": "number",  "minimum": 0 }
+          }
+        }
+      },
+      "oneOf": [
+        { "required": ["campaign_ids"] },
+        { "required": ["sku_ids"] },
+        { "required": ["sku_filter"] }
+      ]
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["timezone"],
+      "properties": {
+        "timezone":     { "type": "string" },
+        "active_from":  { "type": "string", "format": "date-time" },
+        "active_until": { "type": "string", "format": "date-time" },
+        "cron":         { "type": "string", "pattern": "^[\\S ]+$" }
+      }
+    },
+    "condition": {
+      "oneOf": [
+        { "$ref": "#/$defs/leafMetric" },
+        { "$ref": "#/$defs/leafTime" },
+        { "$ref": "#/$defs/compositeAnd" },
+        { "$ref": "#/$defs/compositeOr" },
+        { "$ref": "#/$defs/compositeNot" }
+      ]
+    },
+    "leafMetric": {
+      "type": "object",
+      "required": ["metric", "op", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "enum": [
+            "cpm", "ctr", "cr_card", "cr_cart", "orders_count",
+            "revenue", "drr", "ad_spend", "position", "stock_total",
+            "stock_fbo", "competitor_min_cpm",
+            "daily_budget_remaining_pct", "localization_index"
+          ]
+        },
+        "op":     { "enum": [">", ">=", "<", "<=", "==", "!=", "in", "not_in", "between"] },
+        "value":  { "anyOf": [
+                    { "type": "number" },
+                    { "type": "string" },
+                    { "type": "array" }
+                  ] },
+        "window": { "enum": ["1h", "4h", "24h", "7d", "30d"] }
+      }
+    },
+    "leafTime": {
+      "type": "object",
+      "required": ["time"],
+      "additionalProperties": false,
+      "properties": {
+        "time": {
+          "type": "object",
+          "properties": {
+            "hours":         { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 23 } },
+            "days_of_week":  { "type": "array", "items": { "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"] } },
+            "dates":         { "type": "array", "items": { "type": "string", "format": "date" } },
+            "exclude_dates": { "type": "array", "items": { "type": "string", "format": "date" } }
+          },
+          "anyOf": [
+            { "required": ["hours"] },
+            { "required": ["days_of_week"] },
+            { "required": ["dates"] }
+          ]
+        }
+      }
+    },
+    "compositeAnd": {
+      "type": "object",
+      "required": ["and"],
+      "additionalProperties": false,
+      "properties": {
+        "and": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/condition" }
+        }
+      }
+    },
+    "compositeOr": {
+      "type": "object",
+      "required": ["or"],
+      "additionalProperties": false,
+      "properties": {
+        "or": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/condition" }
+        }
+      }
+    },
+    "compositeNot": {
+      "type": "object",
+      "required": ["not"],
+      "additionalProperties": false,
+      "properties": {
+        "not": { "$ref": "#/$defs/condition" }
+      }
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type":  { "const": "set_cpm" },
+            "value": { "type": "number", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "factor"],
+          "properties": {
+            "type":   { "const": "scale_cpm" },
+            "factor": { "type": "number", "minimum": 0.1, "maximum": 10.0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "strategy"],
+          "properties": {
+            "type":     { "const": "strategy" },
+            "strategy": { "enum": ["max_coverage","economy_mode","target_drr","target_position","budget_pacing","competitor_beat"] },
+            "params":   { "type": "object" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": { "type": { "const": "pause" } }
+        },
+        {
+          "type": "object",
+          "required": ["type", "actions"],
+          "properties": {
+            "type":    { "const": "sequence" },
+            "actions": { "type": "array", "minItems": 1, "maxItems": 5 }
+          }
+        }
+      ]
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_cpm":                    { "type": "number", "minimum": 0 },
+        "max_cpm":                    { "type": "number", "minimum": 0 },
+        "max_daily_spend_rub":        { "type": "number", "minimum": 0 },
+        "cooldown_minutes":           { "type": "integer","minimum": 1, "maximum": 1440, "default": 15 },
+        "max_change_pct":             { "type": "number", "minimum": 0, "maximum": 100 },
+        "require_approval_above_rub": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

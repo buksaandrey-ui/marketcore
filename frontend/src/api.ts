@@ -1,0 +1,134 @@
+/**
+ * api.ts — клиент для общения с бэкендом MarketCore.
+ *
+ * Принцип работы:
+ * - Все запросы идут на BASE_URL (по умолчанию http://localhost:8100)
+ * - Токен авторизации берётся из localStorage (ключ "mc_token")
+ * - Если сервер недоступен или токена нет — функции бросают ошибку,
+ *   и вызывающий код падает на localStorage как запасной вариант
+ */
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8100'
+
+function getToken(): string | null {
+  return localStorage.getItem('mc_token')
+}
+
+// ─── Auth API ────────────────────────────────────────────────────────────────
+
+export type TokenPair = {
+  access_token: string
+  refresh_token: string
+}
+
+export type UserResponse = {
+  id: string
+  email: string
+  created_at: string
+}
+
+export const authApi = {
+  /** Войти — возвращает пару токенов */
+  login: (email: string, password: string): Promise<TokenPair> =>
+    apiFetch<TokenPair>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  /** Зарегистрироваться — возвращает данные созданного пользователя */
+  register: (email: string, password: string): Promise<UserResponse> =>
+    apiFetch<UserResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+}
+
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken()
+  const res = await fetch(BASE_URL + path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers as Record<string, string> | undefined),
+    },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`API ${res.status}: ${text}`)
+  }
+  if (res.status === 204) return null as T
+  return res.json() as Promise<T>
+}
+
+export type BenchmarkResult = {
+  min: number
+  competitor: number
+  top: number
+  aggressive: number
+  is_real: boolean   // true = реальные данные с площадки, false = заглушка
+  source: string     // текстовое пояснение для пользователя
+}
+
+export const benchmarksApi = {
+  /** Получить ставки через сохранённый аккаунт (требует авторизации) */
+  fetch: (params: {
+    account_id: string
+    platform: 'wb' | 'ozon'
+    pay_model: 'cpm' | 'cpc'
+    category: string
+    placement: string
+  }): Promise<BenchmarkResult> => {
+    const q = new URLSearchParams(params as Record<string, string>).toString()
+    return apiFetch<BenchmarkResult>(`/benchmarks?${q}`)
+  },
+
+  /**
+   * Получить ставки напрямую по API-ключу — без предварительного сохранения аккаунта.
+   * Удобно для быстрого теста ключей.
+   */
+  preview: (params: {
+    platform: 'wb' | 'ozon'
+    pay_model: 'cpm' | 'cpc'
+    api_key: string
+    seller_id?: string
+    category: string
+    placement: string
+  }): Promise<BenchmarkResult> =>
+    apiFetch<BenchmarkResult>('/benchmarks/preview', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+}
+
+export type ServerSchedule = {
+  id: string
+  name: string
+  schedule_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export const schedulesApi = {
+  /** Загрузить список всех расписаний пользователя с сервера */
+  list: (): Promise<ServerSchedule[]> =>
+    apiFetch<ServerSchedule[]>('/schedules'),
+
+  /** Создать новое расписание на сервере */
+  create: (name: string, state: Record<string, unknown>): Promise<ServerSchedule> =>
+    apiFetch<ServerSchedule>('/schedules', {
+      method: 'POST',
+      body: JSON.stringify({ name, schedule_json: state }),
+    }),
+
+  /** Обновить существующее расписание на сервере */
+  update: (id: string, name: string, state: Record<string, unknown>): Promise<ServerSchedule> =>
+    apiFetch<ServerSchedule>(`/schedules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name, schedule_json: state }),
+    }),
+
+  /** Удалить расписание на сервере */
+  delete: (id: string): Promise<null> =>
+    apiFetch<null>(`/schedules/${id}`, { method: 'DELETE' }),
+}
