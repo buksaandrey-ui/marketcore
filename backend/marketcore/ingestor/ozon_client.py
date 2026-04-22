@@ -26,8 +26,8 @@ class OzonClient:
             "Content-Type": "application/json",
         }
 
-    async def get_orders(self, date_from: datetime) -> list[dict]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+    async def _fetch_fbo(self, client: httpx.AsyncClient, date_from: datetime) -> list[dict]:
+        try:
             resp = await client.post(
                 f"{OZON_API_BASE}/v3/posting/fbo/list",
                 headers=self._headers,
@@ -43,8 +43,43 @@ class OzonClient:
                     "with": {"analytics_data": True, "financial_data": False},
                 },
             )
+            if resp.status_code == 403:
+                return []
             resp.raise_for_status()
             return resp.json().get("result", {}).get("postings", [])
+        except httpx.HTTPStatusError:
+            return []
+
+    async def _fetch_fbs(self, client: httpx.AsyncClient, date_from: datetime) -> list[dict]:
+        try:
+            resp = await client.post(
+                f"{OZON_API_BASE}/v3/posting/fbs/list",
+                headers=self._headers,
+                json={
+                    "dir": "asc",
+                    "filter": {
+                        "since": date_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "to": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "status": "",
+                        "delivery_schema": [],
+                    },
+                    "limit": 1000,
+                    "offset": 0,
+                    "with": {"analytics_data": True, "financial_data": False, "barcodes": False},
+                },
+            )
+            if resp.status_code == 403:
+                return []
+            resp.raise_for_status()
+            return resp.json().get("result", {}).get("postings", [])
+        except httpx.HTTPStatusError:
+            return []
+
+    async def get_orders(self, date_from: datetime) -> list[dict]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            fbo = await self._fetch_fbo(client, date_from)
+            fbs = await self._fetch_fbs(client, date_from)
+            return fbo + fbs
 
     async def get_stocks(self) -> list[dict]:
         async with httpx.AsyncClient(timeout=30.0) as client:
