@@ -282,3 +282,78 @@
 }
 .ue-cond-row:last-child { border-bottom: none; }
 .ue-cond-row b { color: #0f172a; }
+
+/* ── Режим анализа (табы) ────────────────────────────────────────────────────── */
+
+.ue-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.ue-mode-tab {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ue-mode-tab:hover { border-color: #6366f1; color: #6366f1; }
+.ue-mode-tab.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ── Сцепка: список чекбоксов ────────────────────────────────────────────────── */
+
+.ue-bundle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.ue-bundle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 13px;
+  color: #475569;
+  transition: all 0.15s;
+}
+.ue-bundle-item:hover { border-color: #6366f1; background: #eef2ff; }
+.ue-bundle-item.selected { border-color: #6366f1; background: #eef2ff; color: #3730a3; }
+.ue-bundle-item input { accent-color: #6366f1; }
+.ue-bundle-name { flex: 1; line-height: 1.3; }
+.ue-bundle-price { font-weight: 600; white-space: nowrap; color: #0f172a; }
+.ue-bundle-hint  { font-size: 12px; color: #94a3b8; text-align: center; padding: 12px 0; }
+
+/* ── Сводка группы ───────────────────────────────────────────────────────────── */
+
+.ue-group-summary {
+  margin-top: 10px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.ue-gs-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #4338ca;
+  padding: 3px 0;
+}
+.ue-gs-row b { color: #312e81; font-weight: 700; }

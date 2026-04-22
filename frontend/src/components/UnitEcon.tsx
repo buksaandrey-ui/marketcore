@@ -83,9 +83,40 @@ function Waterfall({ rows, price }: { rows: WFRow[]; price: number }) {
   )
 }
 
+// ─── Групповая агрегация ──────────────────────────────────────────────────────
+
+type GroupResult = {
+  avgPrice: number; avgCogs: number; avgWeightKg: number; avgDrrPct: number
+  avgBuyoutPct: number; totalOrders: number; totalRevenue: number; totalPromo: number
+  skuCount: number; names: string[]
+}
+
+function aggregateSkus(skus: SkuItem[]): GroupResult | null {
+  if (!skus.length) return null
+  const n = skus.length
+  const totalRevenue = skus.reduce((s, r) => s + r.revenue, 0)
+  const totalPromo = skus.reduce((s, r) => s + totalSpend(r.promo), 0)
+  return {
+    avgPrice: skus.reduce((s, r) => s + r.price, 0) / n,
+    avgCogs: skus.reduce((s, r) => s + r.cogs, 0) / n,
+    avgWeightKg: skus.reduce((s, r) => s + r.weightKg, 0) / n,
+    avgBuyoutPct: skus.reduce((s, r) => s + (BUYOUT_RATE[r.category] ?? 70), 0) / n,
+    avgDrrPct: totalRevenue > 0 ? (totalPromo / totalRevenue) * 100 : 10,
+    totalOrders: skus.reduce((s, r) => s + r.orders, 0),
+    totalRevenue,
+    totalPromo,
+    skuCount: n,
+    names: skus.map(s => s.name),
+  }
+}
+
+type UnitMode = 'single' | 'category' | 'bundle'
+
 // ─── Основной компонент ───────────────────────────────────────────────────────
 
 export function UnitEcon() {
+  const [mode, setMode] = useState<UnitMode>('single')
+
   // Выбор SKU или ручной ввод
   const [selectedSkuId, setSelectedSkuId] = useState<string>('__manual__')
 
@@ -100,6 +131,28 @@ export function UnitEcon() {
   const [drrPct,      setDrrPct]      = useState(10)
   const [storageDays, setStorageDays] = useState(30)
   const [platform]                    = useState<'wb' | 'ozon'>('wb')
+
+  // Режим "По категории"
+  const [groupCategory, setGroupCategory] = useState('Обувь')
+
+  // Режим "Сцепка"
+  const [bundleIds, setBundleIds] = useState<Set<string>>(new Set())
+  const toggleBundle = (id: string) =>
+    setBundleIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+
+  // Агрегация для группового режима
+  const groupSkus = mode === 'category'
+    ? SKUS.filter(s => s.category === groupCategory)
+    : SKUS.filter(s => bundleIds.has(s.id))
+  const groupResult = useMemo(() => aggregateSkus(groupSkus), [groupSkus.map(s => s.id).join(',')])
+
+  // Параметры для группового расчёта
+  const gPrice     = groupResult?.avgPrice     ?? price
+  const gCogs      = groupResult?.avgCogs      ?? cogs
+  const gWeightKg  = groupResult?.avgWeightKg  ?? weightKg
+  const gBuyoutPct = groupResult?.avgBuyoutPct ?? buyoutPct
+  const gDrrPct    = groupResult?.avgDrrPct    ?? drrPct
+  const gCategory  = mode === 'category' ? groupCategory : (groupSkus[0]?.category ?? category)
 
   // Загрузка параметров из выбранного SKU
   const handleSkuSelect = (id: string) => {
@@ -116,30 +169,45 @@ export function UnitEcon() {
     setDrrPct(Math.round((spend / sku.revenue) * 100))
   }
 
-  // Расчёт
+  // Расчёт — одиночный SKU
   const result = useMemo(() => calcUnit({
     price, cogs, weightKg, volumeLiters: volumeL,
     category, taxSystem, buyoutPct, drrPct, storageDays, platform,
   }), [price, cogs, weightKg, volumeL, category, taxSystem, buyoutPct, drrPct, storageDays, platform])
 
-  const { commission, logEffective, storagePerUnit, promoSpend, tax, netProfit, margin, roi } = result
+  // Расчёт — групповой (категория / сцепка)
+  const groupCalc = useMemo(() => mode !== 'single' ? calcUnit({
+    price: gPrice, cogs: gCogs, weightKg: gWeightKg, volumeLiters: gWeightKg * 1.2,
+    category: gCategory, taxSystem, buyoutPct: gBuyoutPct, drrPct: gDrrPct, storageDays, platform,
+  }) : null, [mode, gPrice, gCogs, gWeightKg, gCategory, taxSystem, gBuyoutPct, gDrrPct, storageDays, platform])
+
+  const activeResult = (mode !== 'single' && groupCalc) ? groupCalc : result
+  const activePrice  = mode !== 'single' ? gPrice  : price
+  const activeDrrPct = mode !== 'single' ? gDrrPct : drrPct
+  const activeCat    = mode !== 'single' ? gCategory : category
+
+  const { commission, logEffective, storagePerUnit, promoSpend, tax, netProfit, margin, roi } = activeResult
 
   // Ряды для водопада
   const wfRows: WFRow[] = [
-    { label: 'Цена продажи',        value: price,            color: '#22c55e' },
-    { label: `Комиссия WB ${WB_COMMISSION[category] ?? 12}%`, value: -commission,  color: '#ef4444' },
+    { label: 'Цена продажи',        value: activePrice,      color: '#22c55e' },
+    { label: `Комиссия WB ${WB_COMMISSION[activeCat] ?? 12}%`, value: -commission,  color: '#ef4444' },
     { label: 'Логистика (с возвратами)', value: -logEffective,color: '#f97316' },
-    { label: 'Себестоимость',        value: -cogs,            color: '#f43f5e' },
+    { label: 'Себестоимость',        value: mode !== 'single' ? -gCogs : -cogs, color: '#f43f5e' },
     { label: 'Хранение',             value: -storagePerUnit,  color: '#a855f7' },
-    { label: `Реклама ДРР ${drrPct}%`,  value: -promoSpend,  color: '#ec4899' },
+    { label: `Реклама ДРР ${activeDrrPct.toFixed(0)}%`, value: -promoSpend, color: '#ec4899' },
     { label: `Налог (${TAX_LABELS[taxSystem].split(' ')[0]})`, value: -tax, color: '#64748b' },
     { label: 'Чистая прибыль',       value: netProfit,        color: netProfit >= 0 ? '#16a34a' : '#dc2626', isTotal: true },
   ]
 
   // Прогноз на месяц
   const selectedSku = SKUS.find(s => s.id === selectedSkuId)
-  const monthlyOrders = selectedSku ? selectedSku.orders : Math.round(price > 0 ? 5000 / price * 10 : 50)
+  const monthlyOrders = mode !== 'single'
+    ? (groupResult?.totalOrders ?? 0)
+    : (selectedSku ? selectedSku.orders : Math.round(price > 0 ? 5000 / price * 10 : 50))
   const monthlyProfit = netProfit * monthlyOrders
+
+  const allCategories = [...new Set(SKUS.map(s => s.category))]
 
   return (
     <div className="ue-page">
@@ -148,18 +216,65 @@ export function UnitEcon() {
         <p className="ue-subtitle">Полный расчёт прибыльности с учётом всех расходов</p>
       </div>
 
+      {/* Режим анализа */}
+      <div className="ue-mode-tabs">
+        {([['single','🔍 Один товар'],['category','🗂 По категории'],['bundle','🔗 Сцепка']] as [UnitMode,string][]).map(([m, label]) => (
+          <button key={m} className={`ue-mode-tab ${mode === m ? 'active' : ''}`} onClick={() => setMode(m)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="ue-body">
 
         {/* ── Левая панель: ввод ───────────────────────────── */}
         <div className="ue-inputs">
 
-          {/* Выбор SKU */}
+          {/* Выбор товара — зависит от режима */}
           <div className="ue-section">
             <div className="ue-section-title">Товар</div>
-            <select className="ue-select" value={selectedSkuId} onChange={e => handleSkuSelect(e.target.value)}>
-              <option value="__manual__">— Ввести вручную —</option>
-              {SKUS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+
+            {mode === 'single' && (
+              <select className="ue-select" value={selectedSkuId} onChange={e => handleSkuSelect(e.target.value)}>
+                <option value="__manual__">— Ввести вручную —</option>
+                {SKUS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+
+            {mode === 'category' && (
+              <select className="ue-select" value={groupCategory} onChange={e => setGroupCategory(e.target.value)}>
+                {allCategories.map(c => <option key={c}>{c}</option>)}
+              </select>
+            )}
+
+            {mode === 'bundle' && (
+              <div className="ue-bundle-list">
+                {SKUS.map(s => (
+                  <label key={s.id} className={`ue-bundle-item ${bundleIds.has(s.id) ? 'selected' : ''}`}>
+                    <input type="checkbox" checked={bundleIds.has(s.id)} onChange={() => toggleBundle(s.id)} />
+                    <span className="ue-bundle-name">{s.name}</span>
+                    <span className="ue-bundle-price">₽{s.price.toLocaleString('ru')}</span>
+                  </label>
+                ))}
+                {bundleIds.size === 0 && (
+                  <div className="ue-bundle-hint">Отметь несколько товаров для расчёта сцепки</div>
+                )}
+              </div>
+            )}
+
+            {/* Сводка группы */}
+            {mode !== 'single' && groupResult && (
+              <div className="ue-group-summary">
+                <div className="ue-gs-row"><span>Товаров в группе</span><b>{groupResult.skuCount}</b></div>
+                <div className="ue-gs-row"><span>Всего заказов/мес</span><b>{groupResult.totalOrders.toLocaleString('ru')}</b></div>
+                <div className="ue-gs-row"><span>Ср. цена</span><b>₽{Math.round(groupResult.avgPrice).toLocaleString('ru')}</b></div>
+                <div className="ue-gs-row"><span>Ср. себестоимость</span><b>₽{Math.round(groupResult.avgCogs).toLocaleString('ru')}</b></div>
+                <div className="ue-gs-row"><span>Ср. ДРР группы</span><b>{groupResult.avgDrrPct.toFixed(1)}%</b></div>
+              </div>
+            )}
+            {mode !== 'single' && !groupResult && (
+              <div className="ue-bundle-hint" style={{ marginTop: 8 }}>Нет данных для группы</div>
+            )}
           </div>
 
           {/* Основные параметры */}
@@ -285,13 +400,13 @@ export function UnitEcon() {
           {/* Водопад */}
           <div className="ue-waterfall-wrap">
             <div className="ue-section-title" style={{ marginBottom: 12 }}>Разбивка по статьям</div>
-            <Waterfall rows={wfRows} price={price} />
+            <Waterfall rows={wfRows} price={activePrice} />
           </div>
 
           {/* Точка безубыточности */}
           <div className="ue-breakeven">
             <div className="ue-be-label">Точка безубыточности (мин. цена продажи)</div>
-            <div className="ue-be-value">₽ {(price - netProfit).toLocaleString('ru', { maximumFractionDigits: 0 })}</div>
+            <div className="ue-be-value">₽ {(activePrice - netProfit).toLocaleString('ru', { maximumFractionDigits: 0 })}</div>
             <div className="ue-be-sub">
               Текущая цена выше точки безубыточности на{' '}
               <b>₽ {Math.max(0, netProfit).toLocaleString('ru', { maximumFractionDigits: 0 })}</b>
@@ -300,11 +415,11 @@ export function UnitEcon() {
 
           {/* Комиссия и условия */}
           <div className="ue-conditions">
-            <div className="ue-cond-title">Условия WB (категория: {category})</div>
-            <div className="ue-cond-row"><span>Комиссия</span><b>{WB_COMMISSION[category] ?? 12}%</b></div>
-            <div className="ue-cond-row"><span>Логистика (прямая)</span><b>₽ {wbLogistics(weightKg)}</b></div>
+            <div className="ue-cond-title">Условия WB (категория: {activeCat})</div>
+            <div className="ue-cond-row"><span>Комиссия</span><b>{WB_COMMISSION[activeCat] ?? 12}%</b></div>
+            <div className="ue-cond-row"><span>Логистика (прямая)</span><b>₽ {wbLogistics(mode !== 'single' ? gWeightKg : weightKg)}</b></div>
             <div className="ue-cond-row"><span>Логистика (возврат)</span><b>₽ 60</b></div>
-            <div className="ue-cond-row"><span>% выкупа (типичный)</span><b>{BUYOUT_RATE[category] ?? 70}%</b></div>
+            <div className="ue-cond-row"><span>% выкупа (типичный)</span><b>{BUYOUT_RATE[activeCat] ?? 70}%</b></div>
             <div className="ue-cond-row"><span>Хранение (за период)</span><b>₽ {storagePerUnit.toFixed(0)}</b></div>
           </div>
         </div>

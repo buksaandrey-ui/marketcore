@@ -139,9 +139,42 @@ export const accountsApi = {
     apiFetch(`/accounts/${id}/sync`, { method: 'POST' }),
 }
 
+export type HeatmapData = {
+  has_data: boolean
+  matrix: number[][]
+  max_val: number
+}
+
+export type SalesReport = {
+  has_data: boolean
+  period?: { from: string; to: string }
+  units?: number
+  orders_sum?: number
+  buyout_sum?: number
+  wb_services?: number
+  ad_spend?: number
+  amount_to_pay?: number
+  real_drr?: number
+  by_warehouse?: { warehouse: string; units: number; sum: number }[]
+  stock_by_warehouse?: { warehouse: string; qty: number }[]
+  by_sku?: { sku: string; units: number; orders_sum: number }[]
+}
+
 export const analyticsApi = {
   dashboard: (days = 30): Promise<DashboardSummary> =>
     apiFetch<DashboardSummary>(`/analytics/dashboard?days=${days}`),
+
+  heatmap: (days = 30): Promise<HeatmapData> =>
+    apiFetch<HeatmapData>(`/analytics/orders/heatmap?days=${days}`),
+
+  report: (params: { period: string; date_from?: string; date_to?: string; sku?: string }): Promise<SalesReport> => {
+    const q = new URLSearchParams()
+    q.set('period', params.period)
+    if (params.date_from) q.set('date_from', params.date_from)
+    if (params.date_to)   q.set('date_to',   params.date_to)
+    if (params.sku)       q.set('sku',        params.sku)
+    return apiFetch<SalesReport>(`/analytics/report?${q}`)
+  },
 }
 
 export type ServerSchedule = {

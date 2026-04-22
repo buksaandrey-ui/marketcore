@@ -1,9 +1,9 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketcore.analytics.localization import LIZone, LocalizationService
@@ -115,4 +115,152 @@ async def get_dashboard_summary(
         "drr_to_orders": round(drr_to_orders, 1),
         "drr_to_revenue": round(drr_to_revenue, 1),
         "top_skus": [{"sku": r.sku, "orders_count": r.cnt, "revenue": float(r.revenue)} for r in stock_rows],
+    }
+
+
+async def _get_user_account_ids(db: AsyncSession, user_id: uuid.UUID) -> list:
+    res = await db.execute(
+        select(Account.id).where(Account.user_id == user_id, Account.status == "active")
+    )
+    return [r[0] for r in res.all()]
+
+
+def _period_range(period: str, date_from_str: str | None, date_to_str: str | None) -> tuple[datetime, datetime]:
+    now = datetime.now(timezone.utc)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "today":
+        return today, now
+    if period == "yesterday":
+        return today - timedelta(days=1), today
+    if period == "week":
+        return today - timedelta(days=7), now
+    if period == "month":
+        return today - timedelta(days=30), now
+    if period == "quarter":
+        return today - timedelta(days=90), now
+    if period == "custom" and date_from_str and date_to_str:
+        df = datetime.fromisoformat(date_from_str).replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(date_to_str).replace(tzinfo=timezone.utc) + timedelta(days=1)
+        return df, dt
+    return today - timedelta(days=30), now
+
+
+@router.get("/orders/heatmap")
+async def orders_heatmap(
+    days: int = Query(30),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    account_ids = await _get_user_account_ids(db, current_user.id)
+    if not account_ids:
+        return {"has_data": False, "matrix": [[0] * 24 for _ in range(7)], "max_val": 0}
+
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        text("""
+            SELECT
+                ((EXTRACT(DOW FROM ordered_at AT TIME ZONE 'Europe/Moscow')::int + 6) % 7) AS dow,
+                EXTRACT(HOUR FROM ordered_at AT TIME ZONE 'Europe/Moscow')::int AS hr,
+                COUNT(*) AS cnt
+            FROM orders
+            WHERE account_id = ANY(:ids) AND ordered_at >= :df
+            GROUP BY 1, 2
+        """),
+        {"ids": account_ids, "df": date_from},
+    )).all()
+
+    matrix = [[0] * 24 for _ in range(7)]
+    for r in rows:
+        matrix[int(r.dow)][int(r.hr)] = int(r.cnt)
+    max_val = max((matrix[d][h] for d in range(7) for h in range(24)), default=1)
+    return {"has_data": True, "matrix": matrix, "max_val": max_val}
+
+
+@router.get("/report")
+async def sales_report(
+    period: str = Query("week"),
+    date_from_str: str | None = Query(None, alias="date_from"),
+    date_to_str: str | None = Query(None, alias="date_to"),
+    sku: str | None = Query(None),
+    category: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    account_ids = await _get_user_account_ids(db, current_user.id)
+    if not account_ids:
+        return {"has_data": False}
+
+    df, dt = _period_range(period, date_from_str, date_to_str)
+
+    # Base order filter
+    order_filter = [Order.account_id.in_(account_ids), Order.ordered_at >= df, Order.ordered_at < dt]
+    ad_filter = [AdStat.account_id.in_(account_ids), AdStat.stat_date >= df.date(), AdStat.stat_date < dt.date()]
+    stock_filter = [SkuStock.account_id.in_(account_ids)]
+
+    if sku:
+        order_filter.append(Order.sku == sku)
+        ad_filter.append(AdStat.sku == sku)
+        stock_filter.append(SkuStock.sku == sku)
+
+    # Totals
+    totals = (await db.execute(
+        select(
+            func.coalesce(func.sum(Order.quantity), 0).label("units"),
+            func.coalesce(func.sum(Order.price * Order.quantity), 0).label("orders_sum"),
+        ).where(*order_filter)
+    )).one()
+
+    ad_spend = float((await db.execute(
+        select(func.coalesce(func.sum(AdStat.spend), 0)).where(*ad_filter)
+    )).scalar_one())
+
+    # By warehouse (orders)
+    wh_rows = (await db.execute(
+        select(Order.warehouse, func.sum(Order.quantity).label("units"), func.sum(Order.price * Order.quantity).label("sum"))
+        .where(*order_filter)
+        .group_by(Order.warehouse)
+        .order_by(func.sum(Order.quantity).desc())
+    )).all()
+
+    # Stock by warehouse (latest snapshot)
+    stock_rows = (await db.execute(
+        select(SkuStock.warehouse, func.sum(SkuStock.quantity).label("qty"))
+        .where(*stock_filter)
+        .group_by(SkuStock.warehouse)
+        .order_by(func.sum(SkuStock.quantity).desc())
+    )).all()
+
+    # Per-SKU breakdown
+    sku_rows = (await db.execute(
+        select(
+            Order.sku,
+            func.sum(Order.quantity).label("units"),
+            func.sum(Order.price * Order.quantity).label("orders_sum"),
+        )
+        .where(*order_filter)
+        .group_by(Order.sku)
+        .order_by(func.sum(Order.price * Order.quantity).desc())
+        .limit(50)
+    )).all()
+
+    orders_sum = float(totals.orders_sum)
+    units = int(totals.units)
+    buyout_sum = orders_sum * 0.88          # ~12% возвратов по умолчанию
+    wb_services = orders_sum * 0.05         # ~5% хранение + логистика (оценка)
+    amount_to_pay = buyout_sum - wb_services - ad_spend
+    real_drr = (ad_spend / buyout_sum * 100) if buyout_sum > 0 else 0
+
+    return {
+        "has_data": True,
+        "period": {"from": df.date().isoformat(), "to": (dt - timedelta(days=1)).date().isoformat()},
+        "units": units,
+        "orders_sum": round(orders_sum, 2),
+        "buyout_sum": round(buyout_sum, 2),
+        "wb_services": round(wb_services, 2),
+        "ad_spend": round(ad_spend, 2),
+        "amount_to_pay": round(amount_to_pay, 2),
+        "real_drr": round(real_drr, 1),
+        "by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "units": int(r.units), "sum": float(r.sum)} for r in wh_rows],
+        "stock_by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "qty": int(r.qty)} for r in stock_rows],
+        "by_sku": [{"sku": r.sku, "units": int(r.units), "orders_sum": float(r.orders_sum)} for r in sku_rows],
     }
