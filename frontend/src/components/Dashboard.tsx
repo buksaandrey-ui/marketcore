@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   SKUS, totalSpend,
   type SkuItem, type PromoSpend,
 } from '../data/demo'
+import { analyticsApi, type DashboardSummary } from '../api'
 import './Dashboard.css'
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
@@ -84,6 +85,18 @@ export function Dashboard() {
   const [search,  setSearch]  = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [sortAsc, setSortAsc] = useState(false)
+  const [realData, setRealData] = useState<DashboardSummary | null>(null)
+
+  useEffect(() => {
+    analyticsApi.dashboard().then(setRealData).catch(() => {})
+  }, [])
+
+  const ordersCount = realData?.has_data ? realData.orders_count ?? 0 : totalOrders
+  const ordersSum   = realData?.has_data ? realData.orders_sum   ?? 0 : totalOrdersSum
+  const revenue     = realData?.has_data ? realData.revenue      ?? 0 : totalRevenue
+  const drrO        = realData?.has_data ? realData.drr_to_orders ?? 0 : globalDrrO
+  const drrR        = realData?.has_data ? realData.drr_to_revenue ?? 0 : globalDrrR
+  const isDemo      = !realData?.has_data
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(v => !v)
@@ -109,39 +122,45 @@ export function Dashboard() {
   return (
     <div className="dash">
 
+      {isDemo && (
+        <div style={{ background: '#1e3a2e', border: '1px solid #166534', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#86efac', fontSize: 13 }}>
+          📊 Показаны демо-данные. Подключи реальный аккаунт в разделе <strong>🏪 Аккаунты</strong> для отображения твоей статистики.
+        </div>
+      )}
+
       {/* ── KPI ──────────────────────────────────────────────── */}
       <div className="kpi-row">
         <div className="kpi-card">
           <div className="kpi-top"><span className="kpi-icon">📦</span><span className="kpi-label">Заказы</span></div>
-          <div className="kpi-value">{fmt(totalOrders)} <span className="kpi-unit">шт</span></div>
-          <div className="kpi-sub">Сумма: ₽ {fmt(totalOrdersSum)}</div>
-          <div className="kpi-delta pos">▲ 12.4% vs вчера</div>
+          <div className="kpi-value">{fmt(ordersCount)} <span className="kpi-unit">шт</span></div>
+          <div className="kpi-sub">Сумма: ₽ {fmt(ordersSum)}</div>
+          {isDemo && <div className="kpi-delta pos">▲ 12.4% vs вчера</div>}
         </div>
         <div className="kpi-card">
           <div className="kpi-top"><span className="kpi-icon">💰</span><span className="kpi-label">Выручка</span></div>
-          <div className="kpi-value">₽ {fmt(totalRevenue)}</div>
+          <div className="kpi-value">₽ {fmt(revenue)}</div>
           <div className="kpi-sub">После возвратов</div>
-          <div className="kpi-delta pos">▲ 8.1% vs вчера</div>
+          {isDemo && <div className="kpi-delta pos">▲ 8.1% vs вчера</div>}
         </div>
         <div className="kpi-card">
           <div className="kpi-top"><span className="kpi-icon">👆</span><span className="kpi-label">CTR средний</span></div>
           <div className="kpi-value">{totalCtr.toFixed(1)} <span className="kpi-unit">%</span></div>
           <div className="kpi-sub">По всем SKU</div>
-          <div className="kpi-delta neg">▼ 0.3 пп vs вчера</div>
+          {isDemo && <div className="kpi-delta neg">▼ 0.3 пп vs вчера</div>}
         </div>
         <div className="kpi-card kpi-drr">
           <div className="kpi-top"><span className="kpi-icon">📊</span><span className="kpi-label">ДРР (полный)</span></div>
           <div className="kpi-drr-split">
             <div className="kpi-drr-col">
               <span className="kpi-drr-sublabel">к заказам</span>
-              <span className={`kpi-drr-val ${drrClass(globalDrrO)}`}>{fmtPct(globalDrrO)}</span>
-              <span className="kpi-delta neg" style={{ fontSize: 11 }}>▲ 0.9 пп</span>
+              <span className={`kpi-drr-val ${drrClass(drrO)}`}>{fmtPct(drrO)}</span>
+              {isDemo && <span className="kpi-delta neg" style={{ fontSize: 11 }}>▲ 0.9 пп</span>}
             </div>
             <div className="kpi-drr-divider" />
             <div className="kpi-drr-col">
               <span className="kpi-drr-sublabel">к выручке</span>
-              <span className={`kpi-drr-val ${drrClass(globalDrrR)}`}>{fmtPct(globalDrrR)}</span>
-              <span className="kpi-delta neg" style={{ fontSize: 11 }}>▲ 1.1 пп</span>
+              <span className={`kpi-drr-val ${drrClass(drrR)}`}>{fmtPct(drrR)}</span>
+              {isDemo && <span className="kpi-delta neg" style={{ fontSize: 11 }}>▲ 1.1 пп</span>}
             </div>
           </div>
           <div className="kpi-drr-bar">

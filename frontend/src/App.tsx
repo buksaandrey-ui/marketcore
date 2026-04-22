@@ -4,15 +4,17 @@ import { UnitEcon }        from './components/UnitEcon'
 import { SupplyForecast }  from './components/SupplyForecast'
 import { ScheduleGrid }    from './components/ScheduleGrid'
 import { LoginPage }       from './components/LoginPage'
+import AccountsPage        from './components/AccountsPage'
 import './App.css'
 
-type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding'
+type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'accounts'
 
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard',  icon: '📊', label: 'Дашборд'        },
   { id: 'unit-econ',  icon: '📐', label: 'Юнит-экономика' },
   { id: 'supply',     icon: '📦', label: 'Поставки'       },
   { id: 'bidding',    icon: '⏱',  label: 'Ставки'         },
+  { id: 'accounts',   icon: '🏪', label: 'Аккаунты'       },
 ]
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
         {page === 'unit-econ' && <UnitEcon />}
         {page === 'supply'    && <SupplyForecast />}
         {page === 'bidding'   && <ScheduleGrid />}
+        {page === 'accounts'  && <AccountsPage />}
       </main>
     </div>
   )

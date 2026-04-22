@@ -101,6 +101,49 @@ export const benchmarksApi = {
     }),
 }
 
+export type Account = {
+  id: string
+  marketplace: 'wb' | 'ozon'
+  name: string
+  seller_id: string
+  status: 'pending' | 'active' | 'invalid'
+  last_sync_at: string | null
+  created_at: string
+}
+
+export type DashboardSummary = {
+  has_data: boolean
+  accounts?: { id: string; name: string; marketplace: string; last_sync_at: string | null }[]
+  orders_count?: number
+  orders_sum?: number
+  revenue?: number
+  ad_spend?: number
+  drr_to_orders?: number
+  drr_to_revenue?: number
+  top_skus?: { sku: string; orders_count: number; revenue: number }[]
+}
+
+export const accountsApi = {
+  list: (): Promise<Account[]> => apiFetch<Account[]>('/accounts'),
+
+  create: (data: { marketplace: string; name: string; seller_id: string; api_key: string }): Promise<Account> =>
+    apiFetch<Account>('/accounts', { method: 'POST', body: JSON.stringify(data) }),
+
+  delete: (id: string): Promise<null> =>
+    apiFetch<null>(`/accounts/${id}`, { method: 'DELETE' }),
+
+  verify: (id: string): Promise<Account> =>
+    apiFetch<Account>(`/accounts/${id}/verify`, { method: 'POST' }),
+
+  sync: (id: string): Promise<{ status: string; synced: Record<string, number> }> =>
+    apiFetch(`/accounts/${id}/sync`, { method: 'POST' }),
+}
+
+export const analyticsApi = {
+  dashboard: (days = 30): Promise<DashboardSummary> =>
+    apiFetch<DashboardSummary>(`/analytics/dashboard?days=${days}`),
+}
+
 export type ServerSchedule = {
   id: string
   name: string

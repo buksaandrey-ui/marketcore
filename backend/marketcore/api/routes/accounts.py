@@ -1,9 +1,11 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketcore.accounts import service
+from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.api.schemas.accounts import AccountCreate, AccountResponse
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
@@ -59,3 +61,47 @@ async def verify_account(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return AccountResponse.model_validate(account)
+
+
+@router.post("/{account_id}/sync")
+async def sync_account(
+    account_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    try:
+        account = await service.get_account(db, account_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    api_key = decrypt_api_key(account.api_key_cipher)
+    account_id_str = str(account_id)
+    date_from = datetime.now(timezone.utc) - timedelta(days=30)
+    results: dict = {}
+
+    try:
+        if account.marketplace == "wb":
+            from marketcore.ingestor.db import save_orders_wb, save_stocks_wb
+            from marketcore.ingestor.wb_client import WBClient
+            client = WBClient(api_key)
+            orders = await client.get_orders(date_from)
+            results["orders"] = await save_orders_wb(account_id_str, orders)
+            stocks = await client.get_stocks(date_from)
+            results["stocks"] = await save_stocks_wb(account_id_str, stocks)
+        else:
+            from marketcore.ingestor.db import save_orders_ozon, save_stocks_ozon
+            from marketcore.ingestor.ozon_client import OzonClient
+            client = OzonClient(account.seller_id, api_key)
+            orders = await client.get_orders(date_from)
+            results["orders"] = await save_orders_ozon(account_id_str, orders)
+            stocks = await client.get_stocks()
+            results["stocks"] = await save_stocks_ozon(account_id_str, stocks)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка API маркетплейса: {e}")
+
+    # Mark account as active after successful sync
+    account.status = "active"
+    account.last_sync_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {"status": "ok", "synced": results}
