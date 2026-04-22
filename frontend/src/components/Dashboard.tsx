@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  SKUS, totalSpend, WB_COMMISSION, BUYOUT_RATE,
+  SKUS, totalSpend,
   type SkuItem, type PromoSpend,
 } from '../data/demo'
 import './Dashboard.css'
