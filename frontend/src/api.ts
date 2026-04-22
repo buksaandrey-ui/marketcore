@@ -54,6 +54,11 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     },
   })
   if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('mc_token')
+      localStorage.removeItem('mc_refresh_token')
+      window.location.reload()
+    }
     const text = await res.text().catch(() => '')
     throw new Error(`API ${res.status}: ${text}`)
   }
