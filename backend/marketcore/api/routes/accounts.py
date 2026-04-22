@@ -79,23 +79,46 @@ async def sync_account(
     date_from = datetime.now(timezone.utc) - timedelta(days=30)
     results: dict = {}
 
+    date_str_from = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+    date_str_to   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     try:
         if account.marketplace == "wb":
-            from marketcore.ingestor.db import save_orders_wb, save_stocks_wb
+            from marketcore.ingestor.db import save_ad_stats_wb, save_orders_wb, save_prices_wb, save_stocks_wb
             from marketcore.ingestor.wb_client import WBClient
             client = WBClient(api_key)
             orders = await client.get_orders(date_from)
             results["orders"] = await save_orders_wb(account_id_str, orders)
             stocks = await client.get_stocks(date_from)
             results["stocks"] = await save_stocks_wb(account_id_str, stocks)
+            try:
+                prices = await client.get_prices()
+                results["prices"] = await save_prices_wb(account_id_str, prices)
+            except Exception:
+                results["prices"] = 0
+            try:
+                ad_stats = await client.get_ad_stats(date_str_from, date_str_to)
+                results["ad_stats"] = await save_ad_stats_wb(account_id_str, ad_stats)
+            except Exception:
+                results["ad_stats"] = 0
         else:
-            from marketcore.ingestor.db import save_orders_ozon, save_stocks_ozon
+            from marketcore.ingestor.db import save_ad_stats_ozon, save_orders_ozon, save_prices_ozon, save_stocks_ozon
             from marketcore.ingestor.ozon_client import OzonClient
             client = OzonClient(account.seller_id, api_key)
             orders = await client.get_orders(date_from)
             results["orders"] = await save_orders_ozon(account_id_str, orders)
             stocks = await client.get_stocks()
             results["stocks"] = await save_stocks_ozon(account_id_str, stocks)
+            try:
+                prices = await client.get_prices()
+                results["prices"] = await save_prices_ozon(account_id_str, prices)
+            except Exception:
+                results["prices"] = 0
+            try:
+                ad_stats = await client.get_ad_stats(date_str_from, date_str_to)
+                results["ad_stats"] = await save_ad_stats_ozon(account_id_str, ad_stats)
+            except Exception:
+                results["ad_stats"] = 0
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка API маркетплейса: {e}")
 

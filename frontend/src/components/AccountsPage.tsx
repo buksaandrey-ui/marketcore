@@ -57,7 +57,14 @@ export default function AccountsPage() {
     setSyncResult('')
     try {
       const res = await accountsApi.sync(id)
-      setSyncResult(`Синхронизировано: заказов ${res.synced.orders ?? 0}, остатков ${res.synced.stocks ?? 0}`)
+      const s = res.synced
+      const parts = [
+        `заказов ${s.orders ?? 0}`,
+        `остатков ${s.stocks ?? 0}`,
+        ...(s.prices   != null ? [`цен ${s.prices}`]         : []),
+        ...(s.ad_stats != null ? [`рекл. статистики ${s.ad_stats}`] : []),
+      ]
+      setSyncResult(`✅ Синхронизировано: ${parts.join(', ')}`)
       await load()
     } catch (err: unknown) {
       setSyncResult(err instanceof Error ? err.message : 'Ошибка синхронизации')
