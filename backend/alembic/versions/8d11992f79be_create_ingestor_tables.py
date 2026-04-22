@@ -71,11 +71,6 @@ def upgrade() -> None:
         sa.UniqueConstraint('account_id', 'campaign_id', 'sku', 'stat_date', name='uq_ad_stats_unique'),
     )
 
-    # Convert to TimescaleDB hypertables for time-series efficiency
-    op.execute("SELECT create_hypertable('orders', 'ordered_at', if_not_exists => TRUE)")
-    op.execute("SELECT create_hypertable('sku_stocks', 'recorded_at', if_not_exists => TRUE)")
-    op.execute("SELECT create_hypertable('sku_prices', 'recorded_at', if_not_exists => TRUE)")
-    op.execute("SELECT create_hypertable('ad_stats', 'stat_date', if_not_exists => TRUE)")
 
 
 def downgrade() -> None:
