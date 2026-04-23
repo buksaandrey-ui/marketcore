@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { SKUS, WB_COMMISSION, BUYOUT_RATE, wbLogistics, totalSpend } from '../data/demo'
+import { SKUS, WB_COMMISSION, BUYOUT_RATE, wbLogistics, totalSpend, type SkuItem } from '../data/demo'
 import './UnitEcon.css'
 
 // ─── Налоговые системы ────────────────────────────────────────────────────────
