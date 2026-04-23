@@ -128,3 +128,39 @@ async def sync_account(
     await db.commit()
 
     return {"status": "ok", "synced": results}
+
+
+@router.get("/{account_id}/campaigns")
+async def list_campaigns(
+    account_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Список активных рекламных кампаний аккаунта WB.
+
+    Дёргает WB Advert API и возвращает:
+      advert_id, name, type, cpm, subject_id, menu_id.
+    Нужно для того, чтобы пользователь мог выбрать кампанию в расписании.
+    Только для WB (Ozon будет отдельно в Неделе 3).
+    """
+    try:
+        account = await service.get_account(db, account_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    if account.marketplace != "wb":
+        return []
+
+    api_key = decrypt_api_key(account.api_key_cipher)
+    try:
+        from marketcore.ingestor.wb_client import WBClient
+        client = WBClient(api_key)
+        # Возвращаем активные (9) + приостановленные (11) кампании
+        active = await client.list_campaigns(status=9)
+        paused = await client.list_campaigns(status=11)
+        return active + paused
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Ошибка WB API при получении кампаний: {e}",
+        )

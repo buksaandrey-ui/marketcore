@@ -1,11 +1,12 @@
 """Внутрипроцессный планировщик фоновых задач на APScheduler.
 
-На Неделе 1 делает одно: каждые 15 минут обходит все включённые расписания
-и записывает в rule_executions, какая ставка должна быть сейчас. Реальной
-записи в WB/Ozon ЕЩЁ НЕТ — это задача Недели 2.
+Каждые 15 минут обходит все включённые расписания:
+  - Вычисляет целевую ставку (execute_schedule).
+  - Если mode=dry_run — только пишет в rule_executions (без записи на WB).
+  - Если mode=live — реально ставит CPM через WB Advert API (apply_to_wb).
+  - При 3 ошибках подряд по одному расписанию — авто-пауза.
 
-Без Redis и Celery. Планировщик живёт прямо в процессе FastAPI.
-Для MVP этого достаточно. Когда нагрузка вырастет — вынесем в отдельный воркер.
+Без Redis и Celery. Работает прямо в процессе FastAPI.
 """
 from __future__ import annotations
 
@@ -28,9 +29,14 @@ _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
 
 _scheduler: AsyncIOScheduler | None = None
 
+# Счётчик последовательных ошибок по каждому schedule_id.
+# Сбрасывается при успешном тике. Хранится в памяти — ок для MVP.
+_consecutive_failures: dict[str, int] = {}
+MAX_CONSECUTIVE_FAILURES = 3
+
 
 async def tick_bidding_schedules() -> None:
-    """Однократный проход по всем расписаниям: вычислить целевую ставку и залогировать."""
+    """Однократный проход: вычислить ставку и залогировать (+ опционально применить)."""
     now = datetime.now(tz=timezone.utc)
     async with _session_factory() as session:
         schedules = list((await session.execute(select(Schedule))).scalars().all())
@@ -42,22 +48,52 @@ async def tick_bidding_schedules() -> None:
         logged = 0
         for sch in schedules:
             try:
-                # schedule_json может быть сохранён как строка или как dict — нормализуем
+                # Нормализуем schedule_json
                 payload = sch.schedule_json
                 if isinstance(payload, str):
                     import json as _json
                     payload = _json.loads(payload)
                 if not isinstance(payload, dict):
+                    logger.warning("[bidding.tick] schedule_id=%s: не dict, пропуск", sch.id)
+                    continue
+
+                # Авто-пауза при повторных ошибках (хранится в details предыдущих записей)
+                sch_key = str(sch.id)
+                if _consecutive_failures.get(sch_key, 0) >= MAX_CONSECUTIVE_FAILURES:
                     logger.warning(
-                        "[bidding.tick] schedule_id=%s: не dict, пропуск", sch.id
+                        "[bidding.tick] schedule_id=%s: авто-пауза после %d ошибок подряд",
+                        sch.id, MAX_CONSECUTIVE_FAILURES,
                     )
                     continue
 
                 result = evaluate_schedule(payload, now=now)
-
-                # Режим из расписания: если dryRun=False → mode=live (на Неделе 1
-                # мы всё равно только логируем, но уважаем поле чтобы фронт видел намерение)
                 mode = "dry_run" if payload.get("dryRun", True) else "live"
+
+                # ── Если боевой режим и ставка посчитана — применяем ─────────
+                apply_result = None
+                if mode == "live" and result.status == "computed" and result.target_cpm > 0:
+                    apply_result = await _apply_live(sch, payload, result, session)
+
+                # Финальный статус строки в лог
+                if apply_result is not None:
+                    final_status = apply_result.status
+                    final_reason = apply_result.reason
+                    final_details = {**result.details, **apply_result.details}
+                else:
+                    final_status = result.status
+                    final_reason = result.reason
+                    final_details = result.details
+
+                # Обновляем счётчик ошибок
+                if final_status == "failed":
+                    _consecutive_failures[sch_key] = _consecutive_failures.get(sch_key, 0) + 1
+                    if _consecutive_failures[sch_key] >= MAX_CONSECUTIVE_FAILURES:
+                        logger.error(
+                            "[bidding.tick] schedule_id=%s: %d ошибок подряд — включаю авто-паузу",
+                            sch.id, MAX_CONSECUTIVE_FAILURES,
+                        )
+                else:
+                    _consecutive_failures.pop(sch_key, None)
 
                 row = RuleExecution(
                     user_id=sch.user_id,
@@ -73,19 +109,65 @@ async def tick_bidding_schedules() -> None:
                     multiplier_pct=result.multiplier_pct,
                     target_cpm=result.target_cpm,
                     mode=mode,
-                    status=result.status,
-                    reason=result.reason[:500],
-                    details=result.details,
+                    status=final_status,
+                    reason=final_reason[:500],
+                    details=final_details,
                 )
                 session.add(row)
                 logged += 1
-            except Exception as exc:  # noqa: BLE001 — логируем и идём дальше
-                logger.exception(
-                    "[bidding.tick] schedule_id=%s ошибка: %s", sch.id, exc
-                )
+
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("[bidding.tick] schedule_id=%s ошибка: %s", sch.id, exc)
 
         await session.commit()
         logger.info("[bidding.tick] залогировано %d из %d расписаний", logged, len(schedules))
+
+
+async def _apply_live(sch: Schedule, payload: dict, result, session) -> object:
+    """Расшифровать ключ аккаунта и вызвать applier."""
+    from sqlalchemy import select as _select
+    from marketcore.accounts.encryption import decrypt_api_key
+    from marketcore.bidding.applier import apply_to_wb
+    from marketcore.models import Account, RuleExecution
+
+    account_id_str = result.account_id
+    if not account_id_str:
+        from marketcore.bidding.applier import ApplyResult
+        return ApplyResult(
+            success=False, status="guardrail",
+            reason="Аккаунт не привязан к расписанию",
+            details={},
+        )
+
+    import uuid
+    acc = (await session.execute(
+        _select(Account).where(Account.id == uuid.UUID(account_id_str))
+    )).scalar_one_or_none()
+
+    if acc is None:
+        from marketcore.bidding.applier import ApplyResult
+        return ApplyResult(
+            success=False, status="failed",
+            reason=f"Аккаунт {account_id_str} не найден в БД",
+            details={},
+        )
+
+    # Последняя реально применённая ставка по этой кампании
+    last_cpm: float | None = None
+    last_exec = (await session.execute(
+        _select(RuleExecution)
+        .where(
+            RuleExecution.schedule_id == sch.id,
+            RuleExecution.status == "applied",
+        )
+        .order_by(RuleExecution.computed_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if last_exec is not None:
+        last_cpm = last_exec.target_cpm
+
+    api_key = decrypt_api_key(acc.api_key_cipher)
+    return await apply_to_wb(api_key, payload, result, last_applied_cpm=last_cpm)
 
 
 def start_scheduler() -> None:
@@ -94,7 +176,6 @@ def start_scheduler() -> None:
     if _scheduler is not None:
         return
     _scheduler = AsyncIOScheduler(timezone="UTC")
-    # Каждые 15 минут: :00, :15, :30, :45
     _scheduler.add_job(
         tick_bidding_schedules,
         CronTrigger(minute="0,15,30,45"),

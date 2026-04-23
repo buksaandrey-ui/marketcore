@@ -9,7 +9,7 @@
  * Неделя 2: появятся строки со status=applied (реально применено).
  */
 import { useEffect, useState } from 'react'
-import { biddingExecutionsApi, type BotExecution } from '../api'
+import { biddingExecutionsApi, schedulesApi, type BotExecution } from '../api'
 
 const STATUS_LABEL: Record<BotExecution['status'], { text: string; color: string }> = {
   computed: { text: 'Посчитано', color: '#3b82f6' },
@@ -30,6 +30,30 @@ export function BotHistoryPage() {
   const [rows, setRows] = useState<BotExecution[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [killLoading, setKillLoading] = useState(false)
+
+  // Kill Switch — переводит ВСЕ расписания в dry-run
+  const handleKillSwitch = async () => {
+    if (!window.confirm(
+      '🛑 Остановить всех ботов?\n\n' +
+      'Все расписания будут переведены в тестовый режим (dry-run).\n' +
+      'Реальных изменений ставок на WB/Ozon больше не будет.\n\n' +
+      'Нажми OK для подтверждения.'
+    )) return
+    setKillLoading(true)
+    try {
+      const schedules = await schedulesApi.list()
+      for (const s of schedules) {
+        const json = { ...(s.schedule_json as Record<string, unknown>), dryRun: true }
+        await schedulesApi.update(s.id, s.name, json)
+      }
+      alert(`✅ Готово! ${schedules.length} расписаний переведено в тестовый режим.`)
+    } catch (e) {
+      alert(`Ошибка: ${e}`)
+    } finally {
+      setKillLoading(false)
+    }
+  }
 
   const reload = () => {
     setLoading(true)
@@ -51,15 +75,29 @@ export function BotHistoryPage() {
     <div style={{ padding: '24px 32px', maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>📋 История бота</h1>
-        <button
-          onClick={reload}
-          style={{
-            background: '#f3f4f6', border: '1px solid #d1d5db',
-            borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13,
-          }}
-        >
-          🔄 Обновить
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleKillSwitch}
+            disabled={killLoading}
+            style={{
+              background: '#fee2e2', border: '1px solid #fca5a5',
+              borderRadius: 6, padding: '6px 14px', cursor: 'pointer',
+              fontSize: 13, color: '#b91c1c', fontWeight: 600,
+            }}
+            title="Перевести все расписания в тестовый режим — бот перестанет менять ставки на WB/Ozon"
+          >
+            {killLoading ? '⏳' : '🛑'} Стоп всех ботов
+          </button>
+          <button
+            onClick={reload}
+            style={{
+              background: '#f3f4f6', border: '1px solid #d1d5db',
+              borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13,
+            }}
+          >
+            🔄 Обновить
+          </button>
+        </div>
       </div>
 
       <div style={{

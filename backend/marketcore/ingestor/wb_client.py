@@ -123,6 +123,59 @@ class WBClient:
             "aggressive": round(min_cpc * 9.0),
         }
 
+    # ─── Advert / Campaign management ─────────────────────────────────────────
+
+    async def list_campaigns(self, status: int = 9) -> list[dict]:
+        """Список рекламных кампаний.
+
+        status: 4=готова, 7=завершена, 9=активна, 11=на паузе.
+        По умолчанию возвращаем только активные (9).
+        Возвращаем список dicts с полями: advertId, name, type, status, cpm.
+        """
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
+                headers=self._headers,
+                params={"status": status, "limit": 100, "order": "create", "direction": "desc"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        if not data:
+            return []
+        result = []
+        for item in data:
+            result.append({
+                "advert_id": item.get("advertId"),
+                "name": item.get("name", f"Кампания {item.get('advertId')}"),
+                "type": item.get("type"),           # 5=поиск, 6=каталог, 8=авто, 9=поиск+каталог
+                "status": item.get("status"),
+                "cpm": item.get("cpm", 0),
+                "subject_id": item.get("subject", {}).get("id") if isinstance(item.get("subject"), dict) else None,
+                "menu_id": item.get("unitedParams", [{}])[0].get("subject", {}).get("id") if item.get("unitedParams") else None,
+            })
+        return result
+
+    async def set_campaign_cpm(
+        self,
+        advert_id: int,
+        advert_type: int,
+        cpm: int,
+        param: int,
+    ) -> None:
+        """Установить ставку CPM для кампании.
+
+        advert_type: тип кампании (5=поиск, 6=каталог, 8=авто, 9=авто+поиск).
+        param: ID предмета (subject_id) или ID меню (menu_id) — зависит от типа.
+        WB API: POST /adv/v0/cpm  body: {advertId, type, cpm, param}
+        """
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{WB_ADV_BASE}/adv/v0/cpm",
+                headers=self._headers,
+                json={"advertId": advert_id, "type": advert_type, "cpm": cpm, "param": param},
+            )
+            resp.raise_for_status()
+
     async def get_ad_stats(self, date_from: str, date_to: str) -> list[dict]:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(

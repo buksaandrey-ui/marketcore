@@ -128,6 +128,16 @@ export type DashboardSummary = {
   top_skus?: { sku: string; orders_count: number; revenue: number }[]
 }
 
+export type WbCampaign = {
+  advert_id: number
+  name: string
+  type: number        // 5=поиск, 6=каталог, 8=авто, 9=поиск+каталог
+  status: number      // 9=активна, 11=на паузе
+  cpm: number
+  subject_id: number | null
+  menu_id: number | null
+}
+
 export const accountsApi = {
   list: (): Promise<Account[]> => apiFetch<Account[]>('/accounts'),
 
@@ -142,6 +152,9 @@ export const accountsApi = {
 
   sync: (id: string): Promise<{ status: string; synced: Record<string, number> }> =>
     apiFetch(`/accounts/${id}/sync`, { method: 'POST' }),
+
+  campaigns: (id: string): Promise<WbCampaign[]> =>
+    apiFetch<WbCampaign[]>(`/accounts/${id}/campaigns`),
 }
 
 export type HeatmapData = {

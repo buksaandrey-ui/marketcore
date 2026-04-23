@@ -245,6 +245,12 @@ export function ScheduleGrid() {
   const [apiKeysOpen, setApiKeysOpen] = useState(false)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [selectedAccountId, setSelectedAccountId] = useState<string>('')
+  // Неделя 2: выбор рекламной кампании для live-режима
+  const [campaigns, setCampaigns] = useState<import('../api').WbCampaign[]>([])
+  const [campaignsLoading, setCampaignsLoading] = useState(false)
+  const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null)
+  const [selectedCampaignType, setSelectedCampaignType] = useState<number>(5)
+  const [selectedCampaignParam, setSelectedCampaignParam] = useState<number>(0)
 
   // Статистика
   type StatsPeriod = 'month' | 'quarter' | 'year'
@@ -341,6 +347,19 @@ export function ScheduleGrid() {
     localStorage.removeItem('mc_oz_cid')
     localStorage.removeItem('mc_oz_key')
   }, [])
+
+  // При смене аккаунта — загружаем кампании WB (только для WB и live-режима)
+  useEffect(() => {
+    if (!selectedAccountId || platform !== 'wb') {
+      setCampaigns([])
+      setSelectedCampaignId(null)
+      return
+    }
+    setCampaignsLoading(true)
+    accountsApi.campaigns(selectedAccountId)
+      .then((list) => { setCampaigns(list); setCampaignsLoading(false) })
+      .catch(() => { setCampaigns([]); setCampaignsLoading(false) })
+  }, [selectedAccountId, platform])
 
   const switchPayModel = (m: PayModel) => {
     setPayModel(m)
@@ -576,6 +595,9 @@ export function ScheduleGrid() {
     grid,
     activeValue,
     accountId: selectedAccountId,
+    campaignId: selectedCampaignId,
+    campaignType: selectedCampaignType,
+    campaignParam: selectedCampaignParam,
   })
 
   type SavedState = ReturnType<typeof serializeState>
@@ -605,6 +627,9 @@ export function ScheduleGrid() {
     if (s.grid !== undefined) setGrid(s.grid)
     if (s.activeValue !== undefined) setActiveValue(s.activeValue)
     if (s.accountId !== undefined) setSelectedAccountId(s.accountId)
+    if (s.campaignId !== undefined) setSelectedCampaignId(s.campaignId)
+    if (s.campaignType !== undefined) setSelectedCampaignType(s.campaignType)
+    if (s.campaignParam !== undefined) setSelectedCampaignParam(s.campaignParam)
     setPast([])
     setFuture([])
   }
@@ -815,14 +840,29 @@ export function ScheduleGrid() {
               📊 Статистика
             </button>
           </div>
-          <label className={`toggle ${dryRun ? 'toggle-warn' : ''}`}>
+          <label
+            className={`toggle ${dryRun ? 'toggle-warn' : 'toggle-live'}`}
+            title={dryRun
+              ? 'Тестовый режим: бот СЧИТАЕТ ставки, но ничего не меняет на WB/Ozon'
+              : 'БОЕВОЙ РЕЖИМ: бот реально меняет ставку на WB каждые 15 минут!'
+            }
+          >
             <input
               type="checkbox"
               checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
+              onChange={(e) => {
+                const goLive = !e.target.checked
+                if (goLive && !window.confirm(
+                  '⚡ Включить боевой режим?\n\n' +
+                  'Бот начнёт РЕАЛЬНО менять ставки на WB каждые 15 минут.\n\n' +
+                  'Убедись, что:\n• Выбрана правильная кампания\n• Расписание проверено\n• Базовая ставка правильная\n\n' +
+                  'Нажми OK, чтобы продолжить.'
+                )) return
+                setDryRun(e.target.checked)
+              }}
             />
-            <span title="В тестовом режиме правила считаются, но реальные ставки на WB/Ozon не меняются">
-              {dryRun ? '🧪 Тестовый режим' : '⚡ Боевой режим'}
+            <span>
+              {dryRun ? '🧪 Тест (dry-run)' : '⚡ Боевой режим'}
             </span>
           </label>
           <label className="toggle">
@@ -1122,6 +1162,58 @@ export function ScheduleGrid() {
                 </select>
               </label>
             )}
+            {/* ── Выбор кампании (только WB + выбран аккаунт) ── */}
+            {platform === 'wb' && selectedAccountId && (
+              <label className="api-key-field" style={{ marginTop: 8 }}>
+                <span>Рекламная кампания WB</span>
+                {campaignsLoading ? (
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>⏳ Загружаю кампании…</span>
+                ) : campaigns.length === 0 ? (
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                    Нет активных кампаний. Создай кампанию в рекламном кабинете WB.
+                  </span>
+                ) : (
+                  <select
+                    value={selectedCampaignId ?? ''}
+                    onChange={(e) => {
+                      const id = Number(e.target.value)
+                      const camp = campaigns.find((c) => c.advert_id === id)
+                      setSelectedCampaignId(id || null)
+                      if (camp) {
+                        setSelectedCampaignType(camp.type)
+                        setSelectedCampaignParam(camp.subject_id ?? camp.menu_id ?? 0)
+                      }
+                    }}
+                    style={{ background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13 }}
+                  >
+                    <option value="">— Выбери кампанию —</option>
+                    {campaigns.map((c) => (
+                      <option key={c.advert_id} value={c.advert_id}>
+                        {c.name} (CPM: {c.cpm} ₽) {c.status === 9 ? '🟢' : '⏸️'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </label>
+            )}
+
+            {/* ── Боевой режим: предупреждение ── */}
+            {!dryRun && selectedCampaignId && (
+              <div style={{
+                marginTop: 10,
+                background: '#7c3aed22',
+                border: '1px solid #7c3aed',
+                borderRadius: 6,
+                padding: '8px 12px',
+                fontSize: 12,
+                color: '#c4b5fd',
+              }}>
+                ⚡ <strong>Боевой режим включён</strong> — бот будет реально менять ставку
+                на кампании <em>#{selectedCampaignId}</em> каждые 15 минут по твоему расписанию.
+                Убедись, что расписание правильное, перед сохранением.
+              </div>
+            )}
+
             <p className="muted api-keys-hint">
               🔒 API-ключи хранятся только на сервере в зашифрованном виде. После выбора аккаунта нажми «🔄 Обновить ставки».
             </p>
