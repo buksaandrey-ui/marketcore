@@ -190,6 +190,27 @@ export type ServerSchedule = {
   updated_at: string
 }
 
+export type BotExecution = {
+  id: string
+  schedule_id: string | null
+  account_id: string | null
+  computed_at: string
+  platform: string
+  pay_model: string
+  base_cpm: number
+  multiplier_pct: number
+  target_cpm: number
+  mode: 'dry_run' | 'live'
+  status: 'computed' | 'applied' | 'skipped' | 'failed'
+  reason: string
+}
+
+export const biddingExecutionsApi = {
+  /** История действий автобота — что он посчитал и почему */
+  list: (limit = 50): Promise<BotExecution[]> =>
+    apiFetch<BotExecution[]>(`/bidding/executions?limit=${limit}`),
+}
+
 export const schedulesApi = {
   /** Загрузить список всех расписаний пользователя с сервера */
   list: (): Promise<ServerSchedule[]> =>

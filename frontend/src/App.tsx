@@ -7,18 +7,20 @@ import { LoginPage }       from './components/LoginPage'
 import AccountsPage        from './components/AccountsPage'
 import { BehaviorPage }    from './components/BehaviorPage'
 import { ReportsPage }     from './components/ReportsPage'
+import { BotHistoryPage }  from './components/BotHistoryPage'
 import './App.css'
 
-type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'accounts' | 'behavior' | 'reports'
+type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'bot-history' | 'accounts' | 'behavior' | 'reports'
 
 const NAV: { id: Page; icon: string; label: string }[] = [
-  { id: 'dashboard',  icon: '📊', label: 'Дашборд'        },
-  { id: 'unit-econ',  icon: '📐', label: 'Юнит-экономика' },
-  { id: 'supply',     icon: '📦', label: 'Поставки'       },
-  { id: 'bidding',    icon: '⏱',  label: 'Ставки'         },
-  { id: 'behavior',   icon: '📈', label: 'Поведение'      },
-  { id: 'reports',    icon: '📋', label: 'Отчёты'         },
-  { id: 'accounts',   icon: '🏪', label: 'Аккаунты'       },
+  { id: 'dashboard',   icon: '📊', label: 'Дашборд'        },
+  { id: 'unit-econ',   icon: '📐', label: 'Юнит-экономика' },
+  { id: 'supply',      icon: '📦', label: 'Поставки'       },
+  { id: 'bidding',     icon: '⏱',  label: 'Ставки'         },
+  { id: 'bot-history', icon: '🤖', label: 'История бота'   },
+  { id: 'behavior',    icon: '📈', label: 'Поведение'      },
+  { id: 'reports',     icon: '📋', label: 'Отчёты'         },
+  { id: 'accounts',    icon: '🏪', label: 'Аккаунты'       },
 ]
 
 export default function App() {
@@ -64,6 +66,7 @@ export default function App() {
         {page === 'unit-econ' && <UnitEcon />}
         {page === 'supply'    && <SupplyForecast />}
         {page === 'bidding'   && <ScheduleGrid />}
+        {page === 'bot-history' && <BotHistoryPage />}
         {page === 'behavior'  && <BehaviorPage />}
         {page === 'reports'   && <ReportsPage />}
         {page === 'accounts'  && <AccountsPage />}

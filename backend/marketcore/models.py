@@ -158,3 +158,31 @@ class BiddingRule(Base):
     __table_args__ = (
         UniqueConstraint("account_id", "rule_id", name="uq_bidding_rules_account_rule"),
     )
+
+
+class RuleExecution(Base):
+    """Лог действий автобота — что он вычислил/применил/пропустил и почему.
+
+    status:
+      computed  — бот посчитал целевую ставку (dry-run или ещё не применял)
+      applied   — бот реально изменил ставку на площадке
+      skipped   — правило есть, но применять нечего (ставка не изменилась, вне периода и т.п.)
+      failed    — попытка применить не прошла (ошибка API, guardrail и т.п.)
+    mode: dry_run | live
+    """
+    __tablename__ = "rule_executions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    schedule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("schedules.id"), nullable=True)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    platform: Mapped[str] = mapped_column(String(10), nullable=False)  # wb | ozon
+    pay_model: Mapped[str] = mapped_column(String(10), nullable=False)  # cpm | cpc
+    base_cpm: Mapped[float] = mapped_column(Float, nullable=False)
+    multiplier_pct: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_cpm: Mapped[float] = mapped_column(Float, nullable=False)
+    mode: Mapped[str] = mapped_column(String(10), nullable=False, default="dry_run")  # dry_run | live
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="computed")
+    reason: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

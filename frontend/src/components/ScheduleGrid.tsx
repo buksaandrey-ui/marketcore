@@ -575,6 +575,7 @@ export function ScheduleGrid() {
     bench,
     grid,
     activeValue,
+    accountId: selectedAccountId,
   })
 
   type SavedState = ReturnType<typeof serializeState>
@@ -603,6 +604,7 @@ export function ScheduleGrid() {
     if (s.bench !== undefined) setBench(s.bench)
     if (s.grid !== undefined) setGrid(s.grid)
     if (s.activeValue !== undefined) setActiveValue(s.activeValue)
+    if (s.accountId !== undefined) setSelectedAccountId(s.accountId)
     setPast([])
     setFuture([])
   }
