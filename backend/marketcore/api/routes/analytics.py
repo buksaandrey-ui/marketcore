@@ -222,10 +222,16 @@ async def sales_report(
         .order_by(func.sum(Order.quantity).desc())
     )).all()
 
-    # Stock by warehouse (latest snapshot)
+    # Stock by warehouse — use only the latest snapshot per account
+    # (each sync replaces the snapshot, but as a safety guard we take MAX recorded_at)
+    latest_recorded = (
+        select(func.max(SkuStock.recorded_at))
+        .where(*stock_filter)
+        .scalar_subquery()
+    )
     stock_rows = (await db.execute(
         select(SkuStock.warehouse, func.sum(SkuStock.quantity).label("qty"))
-        .where(*stock_filter)
+        .where(*stock_filter, SkuStock.recorded_at == latest_recorded)
         .group_by(SkuStock.warehouse)
         .order_by(func.sum(SkuStock.quantity).desc())
     )).all()

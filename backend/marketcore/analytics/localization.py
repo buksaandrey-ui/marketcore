@@ -101,8 +101,8 @@ class LocalizationService:
         return recs
 
     async def refresh(self) -> None:
-        """Refresh the materialized view. Should be called periodically (hourly)."""
-        await self._db.execute(text("REFRESH MATERIALIZED VIEW mv_localization_index"))
+        """Refresh the materialized view. CONCURRENTLY avoids locking reads during refresh."""
+        await self._db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_localization_index"))
         await self._db.commit()
 
     @staticmethod

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { benchmarksApi, schedulesApi } from '../api'
+import { accountsApi, benchmarksApi, schedulesApi, type Account } from '../api'
 import './ScheduleGrid.css'
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
@@ -243,10 +243,8 @@ export function ScheduleGrid() {
   const [benchLoading, setBenchLoading] = useState(false)
   const [benchSource, setBenchSource] = useState<string>('')
   const [apiKeysOpen, setApiKeysOpen] = useState(false)
-  // API-ключи хранятся локально — потом переедут в защищённое хранилище бэкенда
-  const [wbApiKey, setWbApiKey] = useState(() => localStorage.getItem('mc_wb_key') ?? '')
-  const [ozClientId, setOzClientId] = useState(() => localStorage.getItem('mc_oz_cid') ?? '')
-  const [ozApiKey, setOzApiKey] = useState(() => localStorage.getItem('mc_oz_key') ?? '')
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('')
 
   // Статистика
   type StatsPeriod = 'month' | 'quarter' | 'year'
@@ -326,9 +324,23 @@ export function ScheduleGrid() {
   }, [grid, past, future])
 
   // При смене платформы чистим выбранные места показа (у разных платформ разные)
+  // и сбрасываем выбранный аккаунт если он не подходит по платформе
   useEffect(() => {
     setPlacements((prev) => prev.filter((p) => PLACEMENTS[platform].includes(p)))
-  }, [platform])
+    setSelectedAccountId((id) => {
+      const acc = accounts.find((a) => a.id === id)
+      return acc && acc.marketplace === platform ? id : ''
+    })
+  }, [platform, accounts])
+
+  // Загружаем список подключённых аккаунтов при монтировании
+  useEffect(() => {
+    accountsApi.list().then(setAccounts).catch(() => {})
+    // Удаляем старые API-ключи из localStorage если они там ещё есть
+    localStorage.removeItem('mc_wb_key')
+    localStorage.removeItem('mc_oz_cid')
+    localStorage.removeItem('mc_oz_key')
+  }, [])
 
   const switchPayModel = (m: PayModel) => {
     setPayModel(m)
@@ -337,21 +349,19 @@ export function ScheduleGrid() {
   }
 
   const refreshBenchmarks = async () => {
-    const apiKey = platform === 'wb' ? wbApiKey : ozApiKey
-    if (!apiKey.trim()) {
+    if (!selectedAccountId) {
       setApiKeysOpen(true)
-      setBenchSource('⚠️ Сначала введи API-ключ в панели «🔑 API ключи» выше')
+      setBenchSource('⚠️ Выбери аккаунт в панели «🔗 Аккаунт для ставок» выше')
       setTimeout(() => setBenchSource(''), 4000)
       return
     }
     setBenchLoading(true)
     setBenchSource('')
     try {
-      const result = await benchmarksApi.preview({
+      const result = await benchmarksApi.fetch({
+        account_id: selectedAccountId,
         platform,
         pay_model: payModel,
-        api_key: apiKey.trim(),
-        seller_id: platform === 'ozon' ? ozClientId.trim() : undefined,
         category,
         placement: placements[0] ?? 'Поиск',
       })
@@ -359,7 +369,7 @@ export function ScheduleGrid() {
       setBaseCpm(result.competitor)
       setBenchSource(result.is_real ? `✅ ${result.source}` : `ℹ️ ${result.source}`)
     } catch {
-      setBenchSource('❌ Сервер недоступен — запусти бэкенд (uvicorn marketcore.api.main:app --reload)')
+      setBenchSource('❌ Не удалось загрузить ставки — проверь подключение к серверу')
     } finally {
       setBenchLoading(false)
       setTimeout(() => setBenchSource(''), 7000)
@@ -1079,48 +1089,39 @@ export function ScheduleGrid() {
         </div>
       </div>
 
-      {/* ─── Панель API-ключей ─── */}
+      {/* ─── Аккаунт для получения ставок ─── */}
       <div className="api-keys-panel">
         <button className="api-keys-toggle" onClick={() => setApiKeysOpen((v) => !v)}>
-          🔑 API ключи площадок {apiKeysOpen ? '▲' : '▼'}
+          🔗 Аккаунт для ставок {apiKeysOpen ? '▲' : '▼'}
         </button>
         {apiKeysOpen && (
           <div className="api-keys-body">
-            <div className="api-key-group">
-              <b>Wildberries</b>
+            {accounts.filter((a) => a.marketplace === platform).length === 0 ? (
+              <p className="muted api-keys-hint">
+                Нет подключённых аккаунтов {platform.toUpperCase()}.
+                Подключи аккаунт в разделе <strong>🏪 Аккаунты</strong>, затем вернись сюда.
+              </p>
+            ) : (
               <label className="api-key-field">
-                <span>API-ключ WB</span>
-                <input
-                  type="password"
-                  placeholder="eyJhbGci..."
-                  value={wbApiKey}
-                  onChange={(e) => { setWbApiKey(e.target.value); localStorage.setItem('mc_wb_key', e.target.value) }}
-                />
+                <span>Аккаунт {platform.toUpperCase()}</span>
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                  style={{ background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13 }}
+                >
+                  <option value="">— Выбери аккаунт —</option>
+                  {accounts
+                    .filter((a) => a.marketplace === platform)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} {a.status === 'active' ? '✅' : '⏳'}
+                      </option>
+                    ))}
+                </select>
               </label>
-            </div>
-            <div className="api-key-group">
-              <b>Ozon</b>
-              <label className="api-key-field">
-                <span>Client ID</span>
-                <input
-                  type="text"
-                  placeholder="12345678"
-                  value={ozClientId}
-                  onChange={(e) => { setOzClientId(e.target.value); localStorage.setItem('mc_oz_cid', e.target.value) }}
-                />
-              </label>
-              <label className="api-key-field">
-                <span>API-ключ Ozon</span>
-                <input
-                  type="password"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  value={ozApiKey}
-                  onChange={(e) => { setOzApiKey(e.target.value); localStorage.setItem('mc_oz_key', e.target.value) }}
-                />
-              </label>
-            </div>
+            )}
             <p className="muted api-keys-hint">
-              🔒 Ключи хранятся только в твоём браузере. После введи ключи — нажми «🔄 Обновить ставки».
+              🔒 API-ключи хранятся только на сервере в зашифрованном виде. После выбора аккаунта нажми «🔄 Обновить ставки».
             </p>
           </div>
         )}

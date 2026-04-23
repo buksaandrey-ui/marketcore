@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -94,10 +94,11 @@ async def save_orders_ozon(account_id: str, raw_postings: list[dict]) -> int:
 
 async def save_stocks_wb(account_id: str, raw_stocks: list[dict]) -> int:
     now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
     rows = [
         {
             "id": uuid.uuid4(),
-            "account_id": uuid.UUID(account_id),
+            "account_id": acc_uuid,
             "sku": str(s.get("nmId", "")),
             "warehouse": str(s.get("warehouseName", "")),
             "quantity": int(s.get("quantity", 0)),
@@ -105,15 +106,24 @@ async def save_stocks_wb(account_id: str, raw_stocks: list[dict]) -> int:
         }
         for s in raw_stocks
     ]
-    return await _bulk_insert(SkuStock, rows)
+    async with _session_factory() as session:
+        # Replace snapshot: delete old rows so every sync reflects current state
+        await session.execute(delete(SkuStock).where(SkuStock.account_id == acc_uuid))
+        if not rows:
+            await session.commit()
+            return 0
+        result = await session.execute(insert(SkuStock).values(rows))
+        await session.commit()
+        return result.rowcount
 
 
 async def save_stocks_ozon(account_id: str, raw_stocks: list[dict]) -> int:
     now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
     rows = [
         {
             "id": uuid.uuid4(),
-            "account_id": uuid.UUID(account_id),
+            "account_id": acc_uuid,
             "sku": str(s.get("item_code", "")),
             "warehouse": str(s.get("warehouse_name", "")),
             "quantity": int(s.get("free_to_sell_amount", 0)),
@@ -121,15 +131,23 @@ async def save_stocks_ozon(account_id: str, raw_stocks: list[dict]) -> int:
         }
         for s in raw_stocks
     ]
-    return await _bulk_insert(SkuStock, rows)
+    async with _session_factory() as session:
+        await session.execute(delete(SkuStock).where(SkuStock.account_id == acc_uuid))
+        if not rows:
+            await session.commit()
+            return 0
+        result = await session.execute(insert(SkuStock).values(rows))
+        await session.commit()
+        return result.rowcount
 
 
 async def save_prices_wb(account_id: str, raw_goods: list[dict]) -> int:
     now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
     rows = [
         {
             "id": uuid.uuid4(),
-            "account_id": uuid.UUID(account_id),
+            "account_id": acc_uuid,
             "sku": str(g.get("nmID", "")),
             "price": float(g.get("price", 0)),
             "discount_percent": int(g.get("discount", 0)),
@@ -137,15 +155,23 @@ async def save_prices_wb(account_id: str, raw_goods: list[dict]) -> int:
         }
         for g in raw_goods
     ]
-    return await _bulk_insert(SkuPrice, rows)
+    async with _session_factory() as session:
+        await session.execute(delete(SkuPrice).where(SkuPrice.account_id == acc_uuid))
+        if not rows:
+            await session.commit()
+            return 0
+        result = await session.execute(insert(SkuPrice).values(rows))
+        await session.commit()
+        return result.rowcount
 
 
 async def save_prices_ozon(account_id: str, raw_items: list[dict]) -> int:
     now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
     rows = [
         {
             "id": uuid.uuid4(),
-            "account_id": uuid.UUID(account_id),
+            "account_id": acc_uuid,
             "sku": str(item.get("offer_id", "")),
             "price": float(item.get("price", {}).get("price", 0)),
             "discount_percent": 0,
@@ -153,7 +179,14 @@ async def save_prices_ozon(account_id: str, raw_items: list[dict]) -> int:
         }
         for item in raw_items
     ]
-    return await _bulk_insert(SkuPrice, rows)
+    async with _session_factory() as session:
+        await session.execute(delete(SkuPrice).where(SkuPrice.account_id == acc_uuid))
+        if not rows:
+            await session.commit()
+            return 0
+        result = await session.execute(insert(SkuPrice).values(rows))
+        await session.commit()
+        return result.rowcount
 
 
 async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:

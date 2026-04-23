@@ -46,7 +46,10 @@ class BenchmarkPreviewRequest(BaseModel):
 
 
 @router.post("/preview", response_model=BenchmarkResponse)
-async def get_benchmarks_preview(body: BenchmarkPreviewRequest) -> BenchmarkResponse:
+async def get_benchmarks_preview(
+    body: BenchmarkPreviewRequest,
+    current_user: User = Depends(get_current_user),
+) -> BenchmarkResponse:
     """
     Быстрая проверка ставок без предварительного сохранения аккаунта.
     API-ключ передаётся в теле запроса напрямую.
