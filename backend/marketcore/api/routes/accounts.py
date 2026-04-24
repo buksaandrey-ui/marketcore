@@ -153,6 +153,7 @@ async def debug_wb_advert(
     )
 
     import httpx as _httpx
+    import json as _json
     results: dict = {}
     async with _httpx.AsyncClient(timeout=20.0) as client:
         try:
@@ -161,7 +162,34 @@ async def debug_wb_advert(
                 headers={"Authorization": advert_key},
             )
             results["count_status"] = r.status_code
-            results["count_body"] = r.text[:2000]
+            results["count_body"] = r.text[:3000]
+            # Попробуем второй шаг если первый успешен
+            if r.status_code == 200:
+                data = r.json()
+                # Извлечь первые несколько ID из любого вложенного уровня
+                ids = []
+                for group in (data.get("adverts") or []):
+                    if isinstance(group, dict):
+                        for k, v in group.items():
+                            results[f"group_keys"] = list(group.keys())
+                            break
+                        for item in (group.get("advert_list") or []):
+                            if isinstance(item, dict):
+                                results["advert_list_item_keys"] = list(item.keys())
+                                results["advert_list_item_sample"] = str(item)[:200]
+                            else:
+                                results["advert_list_item_type"] = type(item).__name__
+                                results["advert_list_item_sample"] = str(item)
+                            if len(ids) < 3:
+                                if isinstance(item, dict):
+                                    for key in ("advertId", "id", "advert_id", "rcid"):
+                                        if item.get(key):
+                                            ids.append(item[key])
+                                            break
+                                elif item:
+                                    ids.append(item)
+                            break
+                results["extracted_ids"] = ids
         except Exception as e:
             results["count_error"] = str(e)
 
