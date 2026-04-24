@@ -125,52 +125,71 @@ class WBClient:
 
     # ─── Advert / Campaign management ─────────────────────────────────────────
 
-    async def list_campaigns(self, status: int = 9) -> list[dict]:
-        """Список рекламных кампаний.
+    async def list_campaigns(self, statuses: list[int] | None = None) -> list[dict]:
+        """Список рекламных кампаний (активные + приостановленные).
 
-        status: 4=готова, 7=завершена, 9=активна, 11=на паузе.
-        По умолчанию возвращаем только активные (9).
-        Возвращаем список dicts с полями: advertId, name, type, status, cpm.
+        Использует актуальный WB API v2 (старый /adv/v1/promotion/adverts удалён WB):
+          Шаг 1: GET /adv/v1/promotion/count   → все ID кампаний продавца
+          Шаг 2: GET /api/advert/v2/adverts    → детали по нужным ID
         """
         import logging as _log
         _logger = _log.getLogger(__name__)
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(
-                f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
-                headers=self._headers,
-                params={"status": status, "limit": 100, "order": "create", "direction": "desc"},
-            )
-            _logger.info("[wb_campaigns] status=%d http=%d body_preview=%.200s",
-                         status, resp.status_code, resp.text)
-            resp.raise_for_status()
-            data = resp.json()
+        if statuses is None:
+            statuses = [9, 11]  # 9=активна, 11=на паузе
 
-        if not data:
+        # ── Шаг 1: получаем все ID кампаний ─────────────────────────────────
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp1 = await client.get(
+                f"{WB_ADV_BASE}/adv/v1/promotion/count",
+                headers=self._headers,
+            )
+            _logger.info("[wb_campaigns] count http=%d body=%.300s", resp1.status_code, resp1.text)
+            resp1.raise_for_status()
+            count_data = resp1.json()
+
+        all_adverts = count_data.get("adverts") or []
+        advert_ids = [
+            a["advertId"] for a in all_adverts
+            if isinstance(a, dict) and a.get("status") in statuses and a.get("advertId")
+        ]
+
+        if not advert_ids:
             return []
 
-        # WB может вернуть как список, так и объект {"adverts": [...]}
-        if isinstance(data, dict):
-            items = data.get("adverts") or data.get("data") or []
-        else:
-            items = data
+        advert_ids = advert_ids[:50]  # API принимает максимум 50
+
+        # ── Шаг 2: получаем детали кампаний ──────────────────────────────────
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp2 = await client.get(
+                f"{WB_ADV_BASE}/api/advert/v2/adverts",
+                headers=self._headers,
+                params={
+                    "ids": ",".join(str(i) for i in advert_ids),
+                    "statuses": ",".join(str(s) for s in statuses),
+                },
+            )
+            _logger.info("[wb_campaigns] details http=%d body=%.300s", resp2.status_code, resp2.text)
+            resp2.raise_for_status()
+            detail_data = resp2.json()
 
         result = []
-        for item in items:
+        for item in (detail_data.get("adverts") or []):
             if not isinstance(item, dict):
                 continue
+            # Пробуем достать subject_id из разных мест в зависимости от типа кампании
             params_list = item.get("params") or item.get("unitedParams") or []
             subject_id = None
-            if params_list and isinstance(params_list, list):
-                first = params_list[0] if params_list else {}
+            if isinstance(params_list, list) and params_list:
+                first = params_list[0] if isinstance(params_list[0], dict) else {}
                 subj = first.get("subject") or {}
                 subject_id = subj.get("id") if isinstance(subj, dict) else None
 
             result.append({
                 "advert_id": item.get("advertId"),
                 "name": item.get("name", f"Кампания {item.get('advertId')}"),
-                "type": item.get("type"),
-                "status": item.get("status"),
+                "type": item.get("type"),       # 8=авто/единая, 9=поиск+каталог
+                "status": item.get("status"),   # 9=активна, 11=на паузе
                 "cpm": item.get("cpm", 0),
                 "subject_id": subject_id,
                 "menu_id": None,
@@ -180,21 +199,28 @@ class WBClient:
     async def set_campaign_cpm(
         self,
         advert_id: int,
-        advert_type: int,
+        nm_ids: list[int],
         cpm: int,
-        param: int,
+        placement: str = "combined",
     ) -> None:
-        """Установить ставку CPM для кампании.
+        """Установить ставку CPM для артикулов в кампании (новый WB API v1).
 
-        advert_type: тип кампании (5=поиск, 6=каталог, 8=авто, 9=авто+поиск).
-        param: ID предмета (subject_id) или ID меню (menu_id) — зависит от типа.
-        WB API: POST /adv/v0/cpm  body: {advertId, type, cpm, param}
+        advert_id:  ID кампании
+        nm_ids:     список артикулов WB в этой кампании (nm)
+        cpm:        ставка в рублях (WB принимает в рублях, не в копейках)
+        placement:  "combined" для Единой кампании (поиск+рекомендации),
+                    "search" или "recommendations" для ручной ставки
+        WB API: PATCH /api/advert/v1/bids
         """
+        bids = [
+            {"advert_id": advert_id, "nm_id": nm, "bid": cpm, "placement": placement}
+            for nm in nm_ids
+        ]
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{WB_ADV_BASE}/adv/v0/cpm",
+            resp = await client.patch(
+                f"{WB_ADV_BASE}/api/advert/v1/bids",
                 headers=self._headers,
-                json={"advertId": advert_id, "type": advert_type, "cpm": cpm, "param": param},
+                json={"bids": bids},
             )
             resp.raise_for_status()
 

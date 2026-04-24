@@ -161,10 +161,8 @@ async def list_campaigns(
     try:
         from marketcore.ingestor.wb_client import WBClient
         client = WBClient(advert_key)
-        # Возвращаем активные (9) + приостановленные (11) кампании
-        active = await client.list_campaigns(status=9)
-        paused = await client.list_campaigns(status=11)
-        return active + paused
+        # Активные (9) + приостановленные (11) — один двухшаговый вызов
+        return await client.list_campaigns(statuses=[9, 11])
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
