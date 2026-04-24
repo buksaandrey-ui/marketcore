@@ -131,6 +131,43 @@ async def sync_account(
     return {"status": "ok", "synced": results}
 
 
+@router.get("/{account_id}/debug-wb-advert")
+async def debug_wb_advert(
+    account_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Отладочный endpoint: возвращает сырой ответ WB Advert API."""
+    try:
+        account = await service.get_account(db, account_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    if account.marketplace != "wb":
+        return {"error": "Только для WB аккаунтов"}
+
+    advert_key = (
+        decrypt_api_key(account.advert_api_key_cipher)
+        if account.advert_api_key_cipher
+        else decrypt_api_key(account.api_key_cipher)
+    )
+
+    import httpx as _httpx
+    results: dict = {}
+    async with _httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            r = await client.get(
+                "https://advert-api.wildberries.ru/adv/v1/promotion/count",
+                headers={"Authorization": advert_key},
+            )
+            results["count_status"] = r.status_code
+            results["count_body"] = r.text[:2000]
+        except Exception as e:
+            results["count_error"] = str(e)
+
+    return results
+
+
 @router.get("/{account_id}/campaigns")
 async def list_campaigns(
     account_id: uuid.UUID,
