@@ -358,7 +358,11 @@ export function ScheduleGrid() {
     setCampaignsLoading(true)
     accountsApi.campaigns(selectedAccountId)
       .then((list) => { setCampaigns(list); setCampaignsLoading(false) })
-      .catch(() => { setCampaigns([]); setCampaignsLoading(false) })
+      .catch((err) => {
+        setCampaigns([])
+        setCampaignsLoading(false)
+        console.error('[campaigns] ошибка загрузки кампаний:', err?.message ?? err)
+      })
   }, [selectedAccountId, platform])
 
   const switchPayModel = (m: PayModel) => {

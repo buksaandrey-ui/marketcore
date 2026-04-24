@@ -132,26 +132,48 @@ class WBClient:
         По умолчанию возвращаем только активные (9).
         Возвращаем список dicts с полями: advertId, name, type, status, cpm.
         """
+        import logging as _log
+        _logger = _log.getLogger(__name__)
+
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
                 f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
                 headers=self._headers,
                 params={"status": status, "limit": 100, "order": "create", "direction": "desc"},
             )
+            _logger.info("[wb_campaigns] status=%d http=%d body_preview=%.200s",
+                         status, resp.status_code, resp.text)
             resp.raise_for_status()
             data = resp.json()
+
         if not data:
             return []
+
+        # WB может вернуть как список, так и объект {"adverts": [...]}
+        if isinstance(data, dict):
+            items = data.get("adverts") or data.get("data") or []
+        else:
+            items = data
+
         result = []
-        for item in data:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            params_list = item.get("params") or item.get("unitedParams") or []
+            subject_id = None
+            if params_list and isinstance(params_list, list):
+                first = params_list[0] if params_list else {}
+                subj = first.get("subject") or {}
+                subject_id = subj.get("id") if isinstance(subj, dict) else None
+
             result.append({
                 "advert_id": item.get("advertId"),
                 "name": item.get("name", f"Кампания {item.get('advertId')}"),
-                "type": item.get("type"),           # 5=поиск, 6=каталог, 8=авто, 9=поиск+каталог
+                "type": item.get("type"),
                 "status": item.get("status"),
                 "cpm": item.get("cpm", 0),
-                "subject_id": item.get("subject", {}).get("id") if isinstance(item.get("subject"), dict) else None,
-                "menu_id": item.get("unitedParams", [{}])[0].get("subject", {}).get("id") if item.get("unitedParams") else None,
+                "subject_id": subject_id,
+                "menu_id": None,
             })
         return result
 
