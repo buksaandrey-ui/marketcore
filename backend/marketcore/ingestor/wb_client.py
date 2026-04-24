@@ -149,10 +149,22 @@ class WBClient:
             count_data = resp1.json()
 
         all_adverts = count_data.get("adverts") or []
-        advert_ids = [
-            a["advertId"] for a in all_adverts
-            if isinstance(a, dict) and a.get("status") in statuses and a.get("advertId")
-        ]
+
+        # Ответ сгруппирован по типу и статусу:
+        # {"adverts": [{"type":8,"status":9,"count":3,"advert_list":[{"advertId":123,...},...]},...]}
+        advert_ids = []
+        for group in all_adverts:
+            if not isinstance(group, dict):
+                continue
+            if group.get("status") not in statuses:
+                continue
+            for item in (group.get("advert_list") or []):
+                if isinstance(item, dict):
+                    aid = item.get("advertId")
+                else:
+                    aid = item  # иногда просто число
+                if aid:
+                    advert_ids.append(int(aid))
 
         if not advert_ids:
             return []
