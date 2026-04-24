@@ -22,7 +22,8 @@ async def create_account(
 ) -> AccountResponse:
     try:
         account = await service.create_account(
-            db, current_user.id, body.marketplace, body.name, body.seller_id, body.api_key
+            db, current_user.id, body.marketplace, body.name, body.seller_id, body.api_key,
+            advert_api_key=body.advert_api_key,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -151,10 +152,15 @@ async def list_campaigns(
     if account.marketplace != "wb":
         return []
 
-    api_key = decrypt_api_key(account.api_key_cipher)
+    # Рекламный API использует отдельный ключ (если задан), иначе — основной
+    if account.advert_api_key_cipher:
+        advert_key = decrypt_api_key(account.advert_api_key_cipher)
+    else:
+        advert_key = decrypt_api_key(account.api_key_cipher)
+
     try:
         from marketcore.ingestor.wb_client import WBClient
-        client = WBClient(api_key)
+        client = WBClient(advert_key)
         # Возвращаем активные (9) + приостановленные (11) кампании
         active = await client.list_campaigns(status=9)
         paused = await client.list_campaigns(status=11)
@@ -162,5 +168,6 @@ async def list_campaigns(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Ошибка WB API при получении кампаний: {e}",
+            detail=f"Ошибка WB Advert API при получении кампаний: {e}. "
+                   f"Убедись что добавлен рекламный API-ключ из cmp.wildberries.ru",
         )

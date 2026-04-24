@@ -123,7 +123,11 @@ async def get_benchmarks(
             source="Кабинет не найден — показаны ориентировочные значения",
         )
 
-    api_key = decrypt_api_key(acc.api_key_cipher)
+    # Для WB ставки — используем рекламный ключ (если задан), иначе основной
+    if platform == "wb" and acc.advert_api_key_cipher:
+        api_key = decrypt_api_key(acc.advert_api_key_cipher)
+    else:
+        api_key = decrypt_api_key(acc.api_key_cipher)
 
     try:
         if platform == "wb":

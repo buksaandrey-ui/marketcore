@@ -14,6 +14,7 @@ export default function AccountsPage() {
     name: '',
     seller_id: '',
     api_key: '',
+    advert_api_key: '',
   })
 
   useEffect(() => { load() }, [])
@@ -34,7 +35,7 @@ export default function AccountsPage() {
     setError('')
     try {
       await accountsApi.create(form)
-      setForm({ marketplace: 'wb', name: '', seller_id: '', api_key: '' })
+      setForm({ marketplace: 'wb', name: '', seller_id: '', api_key: '', advert_api_key: '' })
       setShowForm(false)
       await load()
     } catch (err: unknown) {
@@ -163,7 +164,7 @@ export default function AccountsPage() {
 
             <div>
               <label style={{ color: '#94a3b8', fontSize: 12, display: 'block', marginBottom: 4 }}>
-                API-КЛЮЧ {form.marketplace === 'wb' ? '(из настроек WB Seller)' : '(из личного кабинета Ozon)'}
+                {form.marketplace === 'wb' ? 'API-КЛЮЧ СТАТИСТИКИ (seller.wildberries.ru → Настройки → Доступ к API)' : 'API-КЛЮЧ (из личного кабинета Ozon)'}
               </label>
               <input
                 required
@@ -174,6 +175,24 @@ export default function AccountsPage() {
                 style={{ width: '100%', background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box' }}
               />
             </div>
+
+            {form.marketplace === 'wb' && (
+              <div>
+                <label style={{ color: '#94a3b8', fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  API-КЛЮЧ РЕКЛАМЫ — необязательно (cmp.wildberries.ru → имя → Настройки → Доступ к API)
+                </label>
+                <input
+                  type="password"
+                  value={form.advert_api_key}
+                  onChange={e => setForm(f => ({ ...f, advert_api_key: e.target.value }))}
+                  placeholder="Рекламный ключ из кабинета cmp.wildberries.ru"
+                  style={{ width: '100%', background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box' }}
+                />
+                <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+                  Нужен только для управления ставками. Без него статистика продолжает работать.
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>

@@ -166,7 +166,11 @@ async def _apply_live(sch: Schedule, payload: dict, result, session) -> object:
     if last_exec is not None:
         last_cpm = last_exec.target_cpm
 
-    api_key = decrypt_api_key(acc.api_key_cipher)
+    # Для WB ставок используем рекламный ключ (если задан), иначе основной
+    if acc.advert_api_key_cipher:
+        api_key = decrypt_api_key(acc.advert_api_key_cipher)
+    else:
+        api_key = decrypt_api_key(acc.api_key_cipher)
     return await apply_to_wb(api_key, payload, result, last_applied_cpm=last_cpm)
 
 

@@ -18,6 +18,7 @@ async def create_account(
     name: str,
     seller_id: str,
     api_key: str,
+    advert_api_key: str | None = None,
 ) -> Account:
     if marketplace not in ("wb", "ozon"):
         raise ValueError("marketplace должен быть 'wb' или 'ozon'")
@@ -28,6 +29,7 @@ async def create_account(
         name=name,
         seller_id=seller_id,
         api_key_cipher=encrypt_api_key(api_key),
+        advert_api_key_cipher=encrypt_api_key(advert_api_key) if advert_api_key else None,
         status="pending",
     )
     db.add(account)

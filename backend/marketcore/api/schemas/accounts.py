@@ -9,6 +9,7 @@ class AccountCreate(BaseModel):
     name: str
     seller_id: str
     api_key: str
+    advert_api_key: str | None = None  # WB Advert API — отдельный ключ из cmp.wildberries.ru
 
 
 class AccountResponse(BaseModel):

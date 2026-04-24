@@ -141,7 +141,7 @@ export type WbCampaign = {
 export const accountsApi = {
   list: (): Promise<Account[]> => apiFetch<Account[]>('/accounts'),
 
-  create: (data: { marketplace: string; name: string; seller_id: string; api_key: string }): Promise<Account> =>
+  create: (data: { marketplace: string; name: string; seller_id: string; api_key: string; advert_api_key?: string }): Promise<Account> =>
     apiFetch<Account>('/accounts', { method: 'POST', body: JSON.stringify(data) }),
 
   delete: (id: string): Promise<null> =>
