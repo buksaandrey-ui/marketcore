@@ -248,6 +248,7 @@ export function ScheduleGrid() {
   // Неделя 2: выбор рекламной кампании для live-режима
   const [campaigns, setCampaigns] = useState<import('../api').WbCampaign[]>([])
   const [campaignsLoading, setCampaignsLoading] = useState(false)
+  const [campaignsError, setCampaignsError] = useState<string | null>(null)
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null)
   const [selectedCampaignType, setSelectedCampaignType] = useState<number>(5)
   const [selectedCampaignParam, setSelectedCampaignParam] = useState<number>(0)
@@ -356,12 +357,14 @@ export function ScheduleGrid() {
       return
     }
     setCampaignsLoading(true)
+    setCampaignsError(null)
     accountsApi.campaigns(selectedAccountId)
       .then((list) => { setCampaigns(list); setCampaignsLoading(false) })
       .catch((err) => {
+        const msg: string = err?.message ?? String(err)
         setCampaigns([])
+        setCampaignsError(msg)
         setCampaignsLoading(false)
-        console.error('[campaigns] ошибка загрузки кампаний:', err?.message ?? err)
       })
   }, [selectedAccountId, platform])
 
@@ -1172,6 +1175,10 @@ export function ScheduleGrid() {
                 <span>Рекламная кампания WB</span>
                 {campaignsLoading ? (
                   <span style={{ fontSize: 12, color: '#94a3b8' }}>⏳ Загружаю кампании…</span>
+                ) : campaignsError ? (
+                  <span style={{ fontSize: 12, color: '#fca5a5', wordBreak: 'break-all' }}>
+                    ❌ {campaignsError}
+                  </span>
                 ) : campaigns.length === 0 ? (
                   <span style={{ fontSize: 12, color: '#94a3b8' }}>
                     Нет активных кампаний. Создай кампанию в рекламном кабинете WB.
