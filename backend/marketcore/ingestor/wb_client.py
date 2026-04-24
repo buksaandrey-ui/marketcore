@@ -185,11 +185,30 @@ class WBClient:
             resp2.raise_for_status()
             detail_data = resp2.json()
 
+        # detail_data может быть {"adverts": [...]} или напрямую [...]
+        if isinstance(detail_data, list):
+            detail_items = detail_data
+        else:
+            detail_items = detail_data.get("adverts") or []
+
+        # Если второй запрос вернул пустоту — строим список из ID полученных на шаге 1
+        # чтобы хоть что-то показать пользователю
+        if not detail_items:
+            _logger.warning("[wb_campaigns] details вернул пустой список, строим из advert_ids")
+            return [
+                {"advert_id": aid, "name": f"Кампания #{aid}", "type": None,
+                 "status": 9, "cpm": 0, "subject_id": None, "menu_id": None}
+                for aid in advert_ids
+            ]
+
         result = []
-        for item in (detail_data.get("adverts") or []):
+        for item in detail_items:
             if not isinstance(item, dict):
                 continue
-            # Пробуем достать subject_id из разных мест в зависимости от типа кампании
+
+            advert_id = item.get("advertId") or item.get("advert_id")
+            name = item.get("name") or item.get("campName") or f"Кампания #{advert_id}"
+
             params_list = item.get("params") or item.get("unitedParams") or []
             subject_id = None
             if isinstance(params_list, list) and params_list:
@@ -198,10 +217,10 @@ class WBClient:
                 subject_id = subj.get("id") if isinstance(subj, dict) else None
 
             result.append({
-                "advert_id": item.get("advertId"),
-                "name": item.get("name", f"Кампания {item.get('advertId')}"),
-                "type": item.get("type"),       # 8=авто/единая, 9=поиск+каталог
-                "status": item.get("status"),   # 9=активна, 11=на паузе
+                "advert_id": advert_id,
+                "name": name,
+                "type": item.get("type"),
+                "status": item.get("status"),
                 "cpm": item.get("cpm", 0),
                 "subject_id": subject_id,
                 "menu_id": None,
