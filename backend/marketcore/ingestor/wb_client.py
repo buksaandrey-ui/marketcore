@@ -177,7 +177,6 @@ class WBClient:
                 })
 
         return result[:50]
-        return result
 
     async def set_campaign_cpm(
         self,
