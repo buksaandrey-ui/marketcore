@@ -68,6 +68,12 @@ class UpdateCampaignBody(BaseModel):
     budget_add: int | None = None  # пополнить на N рублей
 
 
+class BulkScheduleBody(BaseModel):
+    account_id: uuid.UUID
+    advert_ids: list[int]
+    hours: list[int]  # 24 значения 0-100
+
+
 class SkuOut(BaseModel):
     sku: str
     name: str | None = None   # название товара из WB Content API
@@ -149,6 +155,30 @@ async def update_campaign(
             await client.set_campaign_budget(advert_id, body.budget_add)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"WB API: {e}")
+
+
+@router.post("/bulk-schedule", response_model=dict)
+async def bulk_set_schedule(
+    body: BulkScheduleBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Установить расписание показов (24 коэффициента) сразу для нескольких кампаний."""
+    if len(body.hours) != 24:
+        raise HTTPException(status_code=400, detail="hours должен содержать ровно 24 элемента")
+
+    _, client = await _get_advert_client(body.account_id, current_user, db)
+
+    results: dict[str, str] = {}
+    for advert_id in body.advert_ids:
+        try:
+            await client.set_campaign_hours(advert_id, body.hours)
+            results[str(advert_id)] = "ok"
+        except Exception as e:
+            results[str(advert_id)] = f"error: {e}"
+
+    ok_count = sum(1 for v in results.values() if v == "ok")
+    return {"applied": ok_count, "total": len(body.advert_ids), "details": results}
 
 
 @router.get("/skus", response_model=list[SkuOut])

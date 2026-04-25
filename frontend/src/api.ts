@@ -249,6 +249,9 @@ export const campaignsApi = {
 
   update: (advertId: number, accountId: string, body: { name?: string; budget_add?: number }): Promise<null> =>
     apiFetch<null>(`/campaigns/${advertId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  bulkSchedule: (accountId: string, advertIds: number[], hours: number[]): Promise<{ applied: number; total: number; details: Record<string, string> }> =>
+    apiFetch(`/campaigns/bulk-schedule`, { method: 'POST', body: JSON.stringify({ account_id: accountId, advert_ids: advertIds, hours }) }),
 }
 
 export const schedulesApi = {

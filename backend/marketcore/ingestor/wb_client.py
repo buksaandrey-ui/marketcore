@@ -207,6 +207,22 @@ class WBClient:
             )
             resp.raise_for_status()
 
+    async def set_campaign_hours(self, advert_id: int, hours: list[int]) -> None:
+        """Установить расписание показов кампании.
+
+        hours: список из 24 чисел (0-100) — коэффициент показа для каждого часа.
+        0 = реклама выключена в этот час, 100 = полная ставка.
+        WB API: POST /adv/v1/schedule/hours
+        """
+        assert len(hours) == 24, "hours должен содержать ровно 24 элемента"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{WB_ADV_BASE}/adv/v1/schedule/hours",
+                headers=self._headers,
+                json={"advertId": advert_id, "hours": hours},
+            )
+            resp.raise_for_status()
+
     async def get_nm_titles(self, nm_ids: list[int]) -> dict[int, str]:
         """Названия товаров nmId → title через WB Content API v2.
         Если ключ не имеет прав на Контент — возвращает пустой словарь.
