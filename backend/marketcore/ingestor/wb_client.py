@@ -128,9 +128,8 @@ class WBClient:
     async def list_campaigns(self, statuses: list[int] | None = None) -> list[dict]:
         """Список рекламных кампаний (активные + приостановленные).
 
-        Использует актуальный WB API v2 (старый /adv/v1/promotion/adverts удалён WB):
-          Шаг 1: GET /adv/v1/promotion/count   → все ID кампаний продавца
-          Шаг 2: GET /api/advert/v2/adverts    → детали по нужным ID
+        Шаг 1: GET /adv/v1/promotion/count   → ID кампаний сгруппированные по типу/статусу
+        Шаг 2: POST /adv/v1/promotion/adverts → детали по массиву ID
         """
         import logging as _log
         _logger = _log.getLogger(__name__)
@@ -150,8 +149,7 @@ class WBClient:
 
         all_adverts = count_data.get("adverts") or []
 
-        # Ответ сгруппирован по типу и статусу:
-        # {"adverts": [{"type":8,"status":9,"count":3,"advert_list":[{"advertId":123,...},...]},...]}
+        # Ответ: {"adverts": [{"type":8,"status":9,"count":3,"advert_list":[{"advertId":123,...},...]},...]}
         advert_ids = []
         for group in all_adverts:
             if not isinstance(group, dict):
@@ -171,28 +169,32 @@ class WBClient:
 
         advert_ids = advert_ids[:50]  # API принимает максимум 50
 
-        # ── Шаг 2: получаем детали кампаний ──────────────────────────────────
+        # ── Шаг 2: детали кампаний через POST ────────────────────────────────
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp2 = await client.get(
-                f"{WB_ADV_BASE}/api/advert/v2/adverts",
+            resp2 = await client.post(
+                f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
                 headers=self._headers,
-                params={
-                    "ids": ",".join(str(i) for i in advert_ids),
-                    "statuses": ",".join(str(s) for s in statuses),
-                },
+                json=advert_ids,  # тело: [123, 456, ...]
             )
-            _logger.info("[wb_campaigns] details http=%d body=%.300s", resp2.status_code, resp2.text)
+            _logger.info("[wb_campaigns] details http=%d body=%.500s", resp2.status_code, resp2.text)
+            if resp2.status_code == 422:
+                # fallback: возвращаем ID без имён
+                return [
+                    {"advert_id": aid, "name": f"Кампания #{aid}", "type": None,
+                     "status": 9, "cpm": 0, "subject_id": None, "menu_id": None}
+                    for aid in advert_ids
+                ]
             resp2.raise_for_status()
             detail_data = resp2.json()
 
-        # detail_data может быть {"adverts": [...]} или напрямую [...]
+        # Ответ — напрямую массив объектов кампаний
         if isinstance(detail_data, list):
             detail_items = detail_data
-        else:
+        elif isinstance(detail_data, dict):
             detail_items = detail_data.get("adverts") or []
+        else:
+            detail_items = []
 
-        # Если второй запрос вернул пустоту — строим список из ID полученных на шаге 1
-        # чтобы хоть что-то показать пользователю
         if not detail_items:
             _logger.warning("[wb_campaigns] details вернул пустой список, строим из advert_ids")
             return [
@@ -206,8 +208,17 @@ class WBClient:
             if not isinstance(item, dict):
                 continue
 
-            advert_id = item.get("advertId") or item.get("advert_id")
-            name = item.get("name") or item.get("campName") or f"Кампания #{advert_id}"
+            advert_id = (
+                item.get("advertId")
+                or item.get("advert_id")
+                or item.get("id")
+            )
+            name = (
+                item.get("name")
+                or item.get("campName")
+                or item.get("title")
+                or f"Кампания #{advert_id}"
+            )
 
             params_list = item.get("params") or item.get("unitedParams") or []
             subject_id = None
