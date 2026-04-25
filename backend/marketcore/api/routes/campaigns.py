@@ -157,6 +157,81 @@ async def update_campaign(
         raise HTTPException(status_code=502, detail=f"WB API: {e}")
 
 
+class CampaignStatOut(BaseModel):
+    advert_id: int
+    name: str
+    status: int | None = None
+    views: int = 0
+    clicks: int = 0
+    spend: float = 0.0        # расход (уже с НДС в данных WB)
+    atbs: int = 0             # положили в корзину
+    orders: int = 0           # заказов
+    shks: int = 0             # выкуплено (оплачено)
+    revenue: float = 0.0      # доход
+    drr: float | None = None  # ДРР этой кампании, %
+
+
+@router.get("/stats", response_model=list[CampaignStatOut])
+async def get_campaign_stats(
+    account_id: uuid.UUID = Query(...),
+    days: int = Query(7, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[CampaignStatOut]:
+    """Статистика РК за последние N дней с данными WB: расход, доход, корзина, выкуп, ДРР."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    _, client = await _get_advert_client(account_id, current_user, db)
+
+    # Получаем список ID кампаний
+    try:
+        campaigns = await client.list_campaigns(statuses=[9, 11, 7])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"WB API (список кампаний): {e}")
+
+    if not campaigns:
+        return []
+
+    advert_ids = [c["advert_id"] for c in campaigns]
+    status_map = {c["advert_id"]: c.get("status") for c in campaigns}
+
+    date_to   = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    date_from = (_dt.now(_tz.utc) - _td(days=days)).strftime("%Y-%m-%d")
+
+    try:
+        stats = await client.get_campaign_detailed_stats(advert_ids, date_from, date_to)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"WB API (статистика): {e}")
+
+    result = []
+    for s in stats:
+        drr = round(s["spend"] / s["revenue"] * 100, 1) if s["revenue"] > 0 else None
+        result.append(CampaignStatOut(
+            advert_id=s["advert_id"],
+            name=s["name"],
+            status=status_map.get(s["advert_id"]),
+            views=s["views"],
+            clicks=s["clicks"],
+            spend=round(s["spend"], 2),
+            atbs=s["atbs"],
+            orders=s["orders"],
+            shks=s["shks"],
+            revenue=round(s["revenue"], 2),
+            drr=drr,
+        ))
+
+    # Кампании без статистики тоже показываем (нулями)
+    stats_ids = {s["advert_id"] for s in stats}
+    for c in campaigns:
+        if c["advert_id"] not in stats_ids:
+            result.append(CampaignStatOut(
+                advert_id=c["advert_id"],
+                name=c["name"],
+                status=c.get("status"),
+            ))
+
+    return result
+
+
 @router.post("/bulk-schedule", response_model=dict)
 async def bulk_set_schedule(
     body: BulkScheduleBody,

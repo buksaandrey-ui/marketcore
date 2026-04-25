@@ -252,6 +252,23 @@ export const campaignsApi = {
 
   bulkSchedule: (accountId: string, advertIds: number[], hours: number[]): Promise<{ applied: number; total: number; details: Record<string, string> }> =>
     apiFetch(`/campaigns/bulk-schedule`, { method: 'POST', body: JSON.stringify({ account_id: accountId, advert_ids: advertIds, hours }) }),
+
+  stats: (accountId: string, days = 7): Promise<CampaignStat[]> =>
+    apiFetch<CampaignStat[]>(`/campaigns/stats?account_id=${accountId}&days=${days}`),
+}
+
+export type CampaignStat = {
+  advert_id: number
+  name: string
+  status: number | null
+  views: number
+  clicks: number
+  spend: number
+  atbs: number
+  orders: number
+  shks: number
+  revenue: number
+  drr: number | null
 }
 
 export const schedulesApi = {

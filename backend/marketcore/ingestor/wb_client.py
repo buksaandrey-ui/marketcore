@@ -303,6 +303,77 @@ class WBClient:
                 return int(data.get("advertId") or data.get("id") or 0)
             return int(data)
 
+    async def get_campaign_detailed_stats(
+        self, advert_ids: list[int], date_from: str, date_to: str
+    ) -> list[dict]:
+        """Подробная статистика кампаний через POST /adv/v2/fullstats.
+
+        Возвращает на каждую кампанию:
+          advert_id, name (первый товар), spend, views, clicks,
+          atbs (в корзину), orders (заказы), shks (выкуплено), revenue.
+        WB принимает до 10 кампаний и до 7 дат за запрос — делаем батчи.
+        """
+        from datetime import datetime as _dt, timedelta as _td
+
+        # Список дат диапазона
+        start = _dt.strptime(date_from, "%Y-%m-%d")
+        end   = _dt.strptime(date_to,   "%Y-%m-%d")
+        dates: list[str] = []
+        cur = start
+        while cur <= end:
+            dates.append(cur.strftime("%Y-%m-%d"))
+            cur += _td(days=1)
+
+        aggregated: dict[int, dict] = {}
+
+        # Батчи по 10 кампаний, 7 дат
+        for i in range(0, len(advert_ids), 10):
+            batch_ids = advert_ids[i : i + 10]
+            for j in range(0, len(dates), 7):
+                batch_dates = dates[j : j + 7]
+                payload = [{"id": aid, "dates": batch_dates} for aid in batch_ids]
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{WB_ADV_BASE}/adv/v2/fullstats",
+                            headers=self._headers,
+                            json=payload,
+                        )
+                    if resp.status_code != 200:
+                        continue
+                    rows = resp.json() or []
+                except Exception:
+                    continue
+
+                for row in rows:
+                    aid = row.get("advertId")
+                    if not aid:
+                        continue
+                    if aid not in aggregated:
+                        aggregated[aid] = {
+                            "advert_id": aid, "name": f"Кампания #{aid}",
+                            "views": 0, "clicks": 0, "spend": 0.0,
+                            "atbs": 0, "orders": 0, "shks": 0, "revenue": 0.0,
+                            "nm_ids": [],
+                        }
+                    for nm in (row.get("nm") or []):
+                        nm_name = nm.get("name") or ""
+                        nm_id   = nm.get("nmId")
+                        aggregated[aid]["views"]   += nm.get("views",  0)
+                        aggregated[aid]["clicks"]  += nm.get("clicks", 0)
+                        aggregated[aid]["spend"]   += float(nm.get("sum",     0))
+                        aggregated[aid]["atbs"]    += nm.get("atbs",   0)
+                        aggregated[aid]["orders"]  += nm.get("orders", 0)
+                        aggregated[aid]["shks"]    += nm.get("shks",   0)
+                        aggregated[aid]["revenue"] += float(nm.get("revenue", 0))
+                        if nm_id and nm_id not in aggregated[aid]["nm_ids"]:
+                            aggregated[aid]["nm_ids"].append(nm_id)
+                        # Имя кампании = имя первого товара
+                        if nm_name and aggregated[aid]["name"].startswith("Кампания #"):
+                            aggregated[aid]["name"] = nm_name
+
+        return list(aggregated.values())
+
     async def get_ad_stats(self, date_from: str, date_to: str) -> list[dict]:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(
