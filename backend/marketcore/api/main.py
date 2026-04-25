@@ -10,6 +10,7 @@ from marketcore.api.routes import (
     benchmarks,
     bidding,
     bidding_executions,
+    campaigns,
     schedules,
 )
 from marketcore.config import settings
@@ -49,6 +50,7 @@ app.include_router(bidding.router)
 app.include_router(bidding_executions.router)
 app.include_router(schedules.router)
 app.include_router(benchmarks.router)
+app.include_router(campaigns.router)
 
 
 @app.get("/health")

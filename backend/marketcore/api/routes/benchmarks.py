@@ -1,15 +1,17 @@
 """
-Маршрут /benchmarks — возвращает рыночные ориентиры ставок (мин/конкурент/ТОП/агрессивная)
-с реальных площадок WB и Ozon через их рекламные API.
+Маршрут /benchmarks — возвращает рыночные ориентиры ставок (мин/конкурент/ТОП/агрессивная).
 
-Если запрос к площадке упал (нет подключения, невалидный ключ и т.п.) — возвращаем
-fallback-значения с пометкой is_real=False, чтобы фронт мог показать предупреждение.
+Источники данных (в порядке приоритета):
+1. Реальный средний CPM из таблицы ad_stats аккаунта (если есть данные за 30 дней)
+2. Hardcoded fallback-значения с пометкой is_real=False
 """
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketcore.accounts.encryption import decrypt_api_key
@@ -17,8 +19,7 @@ from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
 from marketcore.ingestor.ozon_client import OzonClient
 from marketcore.ingestor.wb_client import WBClient
-from marketcore.models import Account, User
-from sqlalchemy import select
+from marketcore.models import Account, AdStat, User
 
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
 
@@ -129,30 +130,32 @@ async def get_benchmarks(
     else:
         api_key = decrypt_api_key(acc.api_key_cipher)
 
-    try:
-        if platform == "wb":
-            client = WBClient(api_key)
-            if pay_model == "cpm":
-                data = await client.get_cpm_benchmark(category, placement)
-            else:
-                data = await client.get_cpc_benchmark(category, placement)
-        else:
-            # Для Ozon client_id хранится в seller_id
-            client = OzonClient(client_id=acc.seller_id, api_key=api_key)
-            if pay_model == "cpm":
-                data = await client.get_cpm_benchmark(category, placement)
-            else:
-                data = await client.get_cpc_benchmark(category, placement)
+    # Сначала пробуем посчитать из реальной рекламной статистики аккаунта
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    avg_q = await db.execute(
+        select(func.avg(AdStat.cpm))
+        .where(AdStat.account_id == str(account_id))
+        .where(AdStat.cpm > 0)
+        .where(AdStat.stat_date >= since)
+    )
+    avg_cpm = float(avg_q.scalar() or 0)
 
+    if avg_cpm >= 10:
+        data = {
+            "min": max(5, round(avg_cpm * 0.28)),
+            "competitor": round(avg_cpm),
+            "top": round(avg_cpm * 1.5),
+            "aggressive": round(avg_cpm * 2.4),
+        }
         return BenchmarkResponse(
             **data,
             is_real=True,
-            source=f"Реальные данные {platform.upper()} · {category} · {placement}",
+            source=f"На основе вашей статистики за 30 дней (средний CPM {avg_cpm:.0f}₽)",
         )
-    except Exception as exc:
-        # Площадка недоступна или вернула ошибку — отдаём fallback
-        return BenchmarkResponse(
-            **fallback,
-            is_real=False,
-            source=f"Не удалось получить данные ({exc.__class__.__name__}) — показаны ориентировочные значения",
-        )
+
+    # Fallback — hardcoded ориентиры
+    return BenchmarkResponse(
+        **fallback,
+        is_real=False,
+        source="Нет рекламной статистики — нажмите «Синхронизировать» в Аккаунтах",
+    )

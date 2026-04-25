@@ -206,6 +206,58 @@ class WBClient:
             )
             resp.raise_for_status()
 
+    async def pause_campaign(self, advert_id: int) -> None:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{WB_ADV_BASE}/adv/v0/pause",
+                headers=self._headers,
+                params={"id": advert_id},
+            )
+            resp.raise_for_status()
+
+    async def resume_campaign(self, advert_id: int) -> None:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{WB_ADV_BASE}/adv/v0/start",
+                headers=self._headers,
+                params={"id": advert_id},
+            )
+            resp.raise_for_status()
+
+    async def rename_campaign(self, advert_id: int, name: str) -> None:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{WB_ADV_BASE}/adv/v0/rename",
+                headers=self._headers,
+                json={"advertId": advert_id, "name": name},
+            )
+            resp.raise_for_status()
+
+    async def set_campaign_budget(self, advert_id: int, amount: int) -> None:
+        """Пополнить бюджет кампании на amount рублей."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{WB_ADV_BASE}/adv/v0/budget",
+                headers=self._headers,
+                json={"id": advert_id, "sum": amount, "type": "add"},
+            )
+            resp.raise_for_status()
+
+    async def create_auto_campaign(self, nm_ids: list[int], budget: int, name: str) -> int:
+        """Создать автоматическую кампанию (тип 8). Возвращает advertId."""
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{WB_ADV_BASE}/adv/v1/promotion/auto/save",
+                headers=self._headers,
+                json={"nms": nm_ids, "budget": {"sum": budget}, "name": name},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # WB возвращает {"advertId": 123} или просто число
+            if isinstance(data, dict):
+                return int(data.get("advertId") or data.get("id") or 0)
+            return int(data)
+
     async def get_ad_stats(self, date_from: str, date_to: str) -> list[dict]:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(

@@ -224,6 +224,32 @@ export const biddingExecutionsApi = {
     apiFetch<BotExecution[]>(`/bidding/executions?limit=${limit}`),
 }
 
+export type SkuItem = {
+  sku: string
+  price: number | null
+  stock: number | null
+}
+
+export const campaignsApi = {
+  list: (accountId: string): Promise<WbCampaign[]> =>
+    apiFetch<WbCampaign[]>(`/campaigns?account_id=${accountId}`),
+
+  skus: (accountId: string): Promise<SkuItem[]> =>
+    apiFetch<SkuItem[]>(`/campaigns/skus?account_id=${accountId}`),
+
+  create: (body: { account_id: string; name: string; nm_ids: number[]; budget: number }): Promise<{ advert_id: number; name: string }> =>
+    apiFetch(`/campaigns`, { method: 'POST', body: JSON.stringify(body) }),
+
+  pause: (advertId: number, accountId: string): Promise<null> =>
+    apiFetch<null>(`/campaigns/${advertId}/pause?account_id=${accountId}`, { method: 'POST' }),
+
+  resume: (advertId: number, accountId: string): Promise<null> =>
+    apiFetch<null>(`/campaigns/${advertId}/resume?account_id=${accountId}`, { method: 'POST' }),
+
+  update: (advertId: number, accountId: string, body: { name?: string; budget_add?: number }): Promise<null> =>
+    apiFetch<null>(`/campaigns/${advertId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(body) }),
+}
+
 export const schedulesApi = {
   /** Загрузить список всех расписаний пользователя с сервера */
   list: (): Promise<ServerSchedule[]> =>
