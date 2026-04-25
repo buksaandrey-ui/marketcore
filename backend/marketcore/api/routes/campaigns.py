@@ -70,6 +70,7 @@ class UpdateCampaignBody(BaseModel):
 
 class SkuOut(BaseModel):
     sku: str
+    name: str | None = None   # название товара из WB Content API
     price: float | None = None
     stock: int | None = None
 
@@ -182,9 +183,24 @@ async def list_skus(
     stocks_rows = (await db.execute(stocks_q)).all()
     stock_map: dict[str, int] = {r.sku: r.stock for r in stocks_rows}
 
-    # Объединяем
+    # Пытаемся получить названия из WB Content API (тихо падаем если нет доступа)
     all_skus = sorted(set(price_map) | set(stock_map))
+    name_map: dict[int, str] = {}
+    try:
+        from marketcore.ingestor.wb_client import WBClient
+        main_key = decrypt_api_key(account.api_key_cipher)
+        client = WBClient(main_key)
+        nm_ids = [int(s) for s in all_skus if s.isdigit()]
+        name_map = await client.get_nm_titles(nm_ids)
+    except Exception:
+        pass
+
     return [
-        SkuOut(sku=s, price=price_map.get(s), stock=stock_map.get(s))
+        SkuOut(
+            sku=s,
+            name=name_map.get(int(s)) if s.isdigit() else None,
+            price=price_map.get(s),
+            stock=stock_map.get(s),
+        )
         for s in all_skus
     ]

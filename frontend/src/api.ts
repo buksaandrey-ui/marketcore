@@ -226,6 +226,7 @@ export const biddingExecutionsApi = {
 
 export type SkuItem = {
   sku: string
+  name: string | null
   price: number | null
   stock: number | null
 }

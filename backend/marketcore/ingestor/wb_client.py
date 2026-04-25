@@ -5,6 +5,7 @@ import httpx
 WB_STAT_BASE = "https://statistics-api.wildberries.ru"
 WB_PRICES_BASE = "https://discounts-prices-api.wb.ru"
 WB_ADV_BASE = "https://advert-api.wildberries.ru"
+WB_CONTENT_BASE = "https://content-suppliers.wildberries.ru"
 
 # Соответствие названий категорий → ID предметов WB (subject_id)
 # Нужно для запроса минимальной ставки CPM в аукционе WB
@@ -205,6 +206,34 @@ class WBClient:
                 json={"bids": bids},
             )
             resp.raise_for_status()
+
+    async def get_nm_titles(self, nm_ids: list[int]) -> dict[int, str]:
+        """Названия товаров nmId → title через WB Content API v2.
+        Если ключ не имеет прав на Контент — возвращает пустой словарь.
+        """
+        if not nm_ids:
+            return {}
+        nm_id_set = set(nm_ids)
+        result: dict[int, str] = {}
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    f"{WB_CONTENT_BASE}/content/v2/get/cards/list",
+                    headers=self._headers,
+                    json={"settings": {"cursor": {"limit": 100}, "filter": {"withPhoto": -1}}},
+                )
+                if resp.status_code != 200:
+                    return {}
+                data = resp.json()
+            for card in (data.get("data", {}).get("cards") or []):
+                nid = card.get("nmID")
+                if nid and int(nid) in nm_id_set:
+                    title = card.get("title") or card.get("subjectName") or ""
+                    if title:
+                        result[int(nid)] = title
+        except Exception:
+            pass
+        return result
 
     async def pause_campaign(self, advert_id: int) -> None:
         async with httpx.AsyncClient(timeout=15.0) as client:

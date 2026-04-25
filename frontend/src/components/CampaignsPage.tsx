@@ -357,7 +357,7 @@ export function CampaignsPage() {
                   <label
                     key={s.sku}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
                       background: selectedSkus.has(s.sku) ? '#1e3a5f' : '#0f172a',
                       borderRadius: 6, cursor: 'pointer',
                       border: selectedSkus.has(s.sku) ? '1px solid #38bdf8' : '1px solid #1e293b',
@@ -367,16 +367,25 @@ export function CampaignsPage() {
                       type="checkbox"
                       checked={selectedSkus.has(s.sku)}
                       onChange={() => toggleSku(s.sku)}
-                      style={{ accentColor: '#38bdf8' }}
+                      style={{ accentColor: '#38bdf8', flexShrink: 0 }}
                     />
-                    <span style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600, flex: 1 }}>
-                      Арт. {s.sku}
-                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {s.name ? (
+                        <>
+                          <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {s.name}
+                          </div>
+                          <div style={{ color: '#64748b', fontSize: 11 }}>Арт. {s.sku}</div>
+                        </>
+                      ) : (
+                        <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600 }}>Арт. {s.sku}</div>
+                      )}
+                    </div>
                     {s.price != null && (
-                      <span style={{ color: '#94a3b8', fontSize: 12 }}>{s.price.toLocaleString('ru')}₽</span>
+                      <span style={{ color: '#94a3b8', fontSize: 12, flexShrink: 0 }}>{s.price.toLocaleString('ru')}₽</span>
                     )}
                     {s.stock != null && (
-                      <span style={{ color: s.stock > 0 ? '#22c55e' : '#ef4444', fontSize: 12 }}>
+                      <span style={{ color: s.stock > 0 ? '#22c55e' : '#ef4444', fontSize: 12, flexShrink: 0 }}>
                         {s.stock} шт.
                       </span>
                     )}
