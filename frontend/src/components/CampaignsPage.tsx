@@ -1,25 +1,7 @@
 import { useState, useEffect } from 'react'
 import { accountsApi, campaignsApi, type Account, type WbCampaign, type SkuItem } from '../api'
 
-type Tab = 'list' | 'schedule' | 'create'
-
-// Цвета уровней коэффициента показов
-const LEVEL_META = [
-  { pct: 0,   label: 'Выкл',  bg: '#1e293b', text: '#475569' },
-  { pct: 50,  label: '50%',   bg: '#164e63', text: '#67e8f9' },
-  { pct: 80,  label: '80%',   bg: '#1d4ed8', text: '#bfdbfe' },
-  { pct: 100, label: '100%',  bg: '#15803d', text: '#86efac' },
-]
-const LEVELS = LEVEL_META.map(l => l.pct)  // [0, 50, 80, 100]
-
-function nextLevel(cur: number): number {
-  const i = LEVELS.indexOf(cur)
-  return LEVELS[(i + 1) % LEVELS.length]
-}
-
-function levelMeta(pct: number) {
-  return LEVEL_META.find(l => l.pct === pct) ?? LEVEL_META[0]
-}
+type Tab = 'list' | 'create'
 
 const STATUS_LABEL: Record<number, string> = { 9: '▶ Активна', 11: '⏸ Пауза', 7: '■ Завершена' }
 const STATUS_COLOR: Record<number, string> = { 9: '#22c55e', 11: '#f59e0b', 7: '#64748b' }
@@ -38,12 +20,6 @@ export function CampaignsPage() {
   const [editId, setEditId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editBudget, setEditBudget] = useState('')
-
-  // Расписание
-  const [scheduleHours, setScheduleHours] = useState<number[]>(Array(24).fill(100))
-  const [scheduleSelected, setScheduleSelected] = useState<Set<number>>(new Set())
-  const [applying, setApplying] = useState(false)
-  const [applyResult, setApplyResult] = useState<{ applied: number; total: number } | null>(null)
 
   // Создание
   const [skus, setSkus] = useState<SkuItem[]>([])
@@ -100,53 +76,6 @@ export function CampaignsPage() {
     setTimeout(() => setActionMsg(''), 4000)
   }
 
-  // ── Расписание ──────────────────────────────────────────────────────────
-  function toggleHour(h: number) {
-    setScheduleHours(prev => { const n = [...prev]; n[h] = nextLevel(n[h]); return n })
-  }
-
-  function applyPattern(name: string) {
-    const h = Array(24).fill(0)
-    if (name === 'business') {
-      for (let i = 9; i < 21; i++) h[i] = 100
-    } else if (name === 'peak') {
-      for (let i = 6; i < 9; i++) h[i] = 80
-      for (let i = 11; i < 14; i++) h[i] = 100
-      for (let i = 18; i < 23; i++) h[i] = 100
-    } else if (name === 'full') {
-      h.fill(100)
-    } else if (name === 'economy') {
-      for (let i = 6; i < 22; i++) h[i] = 50
-    }
-    setScheduleHours(h)
-  }
-
-  function toggleScheduleCampaign(id: number) {
-    setScheduleSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  }
-
-  function toggleAllSchedule() {
-    if (scheduleSelected.size === campaigns.length) {
-      setScheduleSelected(new Set())
-    } else {
-      setScheduleSelected(new Set(campaigns.map(c => c.advert_id)))
-    }
-  }
-
-  async function handleApplySchedule() {
-    if (scheduleSelected.size === 0) return
-    setApplying(true)
-    setApplyResult(null)
-    try {
-      const res = await campaignsApi.bulkSchedule(accountId, [...scheduleSelected], scheduleHours)
-      setApplyResult(res)
-      flash(`Расписание применено к ${res.applied} из ${res.total} кампаний`)
-    } catch (e: unknown) {
-      flash(e instanceof Error ? e.message : 'Ошибка применения')
-    } finally {
-      setApplying(false)
-    }
-  }
 
   async function handlePause(id: number) {
     try {
@@ -258,11 +187,8 @@ export function CampaignsPage() {
           <button onClick={() => setTab('list')} style={{ ...btn(tab === 'list' ? '#0f172a' : '#94a3b8', tab === 'list' ? '#38bdf8' : 'transparent'), border: '1px solid #38bdf8' }}>
             Список
           </button>
-          <button onClick={() => setTab('schedule')} style={{ ...btn(tab === 'schedule' ? '#0f172a' : '#94a3b8', tab === 'schedule' ? '#f59e0b' : 'transparent'), border: '1px solid #f59e0b' }}>
-            📅 Расписание
-          </button>
           <button onClick={() => setTab('create')} style={{ ...btn(tab === 'create' ? '#0f172a' : '#94a3b8', tab === 'create' ? '#a78bfa' : 'transparent'), border: '1px solid #a78bfa' }}>
-            + Создать
+            + Создать кампанию
           </button>
         </div>
       </div>
@@ -360,140 +286,6 @@ export function CampaignsPage() {
             ))
           )}
         </>
-      )}
-
-      {/* ── Расписание показов ── */}
-      {tab === 'schedule' && (
-        <div>
-          {/* Конструктор расписания */}
-          <div style={{ ...card, marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <h3 style={{ color: '#f1f5f9', margin: 0, fontSize: 15 }}>Коэффициенты показов по часам</h3>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {[
-                  { key: 'business', label: '💼 Рабочее время' },
-                  { key: 'peak',     label: '📈 Двойной пик' },
-                  { key: 'full',     label: '🕐 Круглосуточно' },
-                  { key: 'economy',  label: '💰 Экономный' },
-                ].map(p => (
-                  <button key={p.key} onClick={() => applyPattern(p.key)} style={{ ...btn('#94a3b8', 'transparent'), fontSize: 11, padding: '4px 8px' }}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Легенда */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-              {LEVEL_META.map(l => (
-                <div key={l.pct} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{ width: 14, height: 14, borderRadius: 3, background: l.bg, border: '1px solid #334155' }} />
-                  <span style={{ color: '#94a3b8', fontSize: 11 }}>{l.label}</span>
-                </div>
-              ))}
-              <span style={{ color: '#475569', fontSize: 11, marginLeft: 8 }}>← Кликни на ячейку чтобы изменить</span>
-            </div>
-
-            {/* Сетка 24 часа */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24, 1fr)', gap: 3 }}>
-              {scheduleHours.map((pct, h) => {
-                const m = levelMeta(pct)
-                return (
-                  <div key={h} style={{ textAlign: 'center' }}>
-                    <div
-                      onClick={() => toggleHour(h)}
-                      title={`${h}:00 — ${m.label}`}
-                      style={{
-                        background: m.bg, color: m.text,
-                        borderRadius: 4, padding: '8px 0',
-                        cursor: 'pointer', fontSize: 11, fontWeight: 700,
-                        border: pct > 0 ? `1px solid ${m.text}44` : '1px solid #334155',
-                        transition: 'all 0.15s',
-                        userSelect: 'none',
-                      }}
-                    >
-                      {pct === 0 ? '—' : `${pct}`}
-                    </div>
-                    <div style={{ color: '#475569', fontSize: 9, marginTop: 2 }}>{h}</div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Итог */}
-            <div style={{ marginTop: 12, color: '#64748b', fontSize: 12 }}>
-              Активных часов: {scheduleHours.filter(h => h > 0).length} из 24 &nbsp;·&nbsp;
-              Средний коэффициент: {Math.round(scheduleHours.reduce((a, b) => a + b, 0) / 24)}%
-            </div>
-          </div>
-
-          {/* Выбор кампаний */}
-          <div style={{ ...card, marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ color: '#f1f5f9', margin: 0, fontSize: 15 }}>
-                Кампании для применения ({scheduleSelected.size} выбрано)
-              </h3>
-              <button onClick={toggleAllSchedule} style={btn()}>
-                {scheduleSelected.size === campaigns.length && campaigns.length > 0 ? 'Снять всё' : 'Выбрать все'}
-              </button>
-            </div>
-
-            {loading ? (
-              <div style={{ color: '#64748b', textAlign: 'center', padding: 20 }}>Загрузка...</div>
-            ) : campaigns.length === 0 ? (
-              <div style={{ color: '#64748b', textAlign: 'center', padding: 20 }}>
-                Нет кампаний. Переключись на вкладку «Список» и нажми «Обновить».
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
-                {campaigns.map(c => (
-                  <label key={c.advert_id} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                    background: scheduleSelected.has(c.advert_id) ? '#1e3a5f' : '#0f172a',
-                    borderRadius: 6, cursor: 'pointer',
-                    border: scheduleSelected.has(c.advert_id) ? '1px solid #38bdf8' : '1px solid #1e293b',
-                  }}>
-                    <input
-                      type="checkbox"
-                      checked={scheduleSelected.has(c.advert_id)}
-                      onChange={() => toggleScheduleCampaign(c.advert_id)}
-                      style={{ accentColor: '#38bdf8', flexShrink: 0 }}
-                    />
-                    <span style={{ color: STATUS_COLOR[c.status ?? 0] ?? '#64748b', fontSize: 12, flexShrink: 0 }}>
-                      {STATUS_LABEL[c.status ?? 0] ?? '?'}
-                    </span>
-                    <span style={{ color: '#f1f5f9', fontSize: 13, flex: 1 }}>{c.name}</span>
-                    <span style={{ color: '#475569', fontSize: 11 }}>#{c.advert_id}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Применить */}
-          {applyResult && (
-            <div style={{ background: '#052e16', color: '#86efac', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
-              ✅ Расписание применено к {applyResult.applied} из {applyResult.total} кампаний
-              {applyResult.applied < applyResult.total && (
-                <span style={{ color: '#fca5a5' }}> (часть кампаний вернула ошибку WB API)</span>
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={handleApplySchedule}
-            disabled={applying || scheduleSelected.size === 0}
-            style={{
-              background: applying || scheduleSelected.size === 0 ? '#1e293b' : '#f59e0b',
-              color: '#0f172a', border: 'none', borderRadius: 8,
-              padding: '10px 28px', fontWeight: 700, cursor: applying || scheduleSelected.size === 0 ? 'not-allowed' : 'pointer', fontSize: 14,
-            }}
-          >
-            {applying
-              ? '⟳ Применяем...'
-              : `📅 Применить расписание к ${scheduleSelected.size} кампани${scheduleSelected.size === 1 ? 'и' : 'ям'}`}
-          </button>
-        </div>
       )}
 
       {/* ── Создание кампаний ── */}

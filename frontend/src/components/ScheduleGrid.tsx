@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { accountsApi, benchmarksApi, schedulesApi, type Account } from '../api'
+import { accountsApi, benchmarksApi, campaignsApi, schedulesApi, type Account } from '../api'
 import './ScheduleGrid.css'
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
@@ -252,6 +252,13 @@ export function ScheduleGrid() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null)
   const [selectedCampaignType, setSelectedCampaignType] = useState<number>(5)
   const [selectedCampaignParam, setSelectedCampaignParam] = useState<number>(0)
+
+  // Массовое применение расписания к РК
+  const [applyPanelOpen, setApplyPanelOpen] = useState(false)
+  const [applyDayIndex, setApplyDayIndex] = useState(0)
+  const [applySelected, setApplySelected] = useState<Set<number>>(new Set())
+  const [applying, setApplying] = useState(false)
+  const [applyResult, setApplyResult] = useState<{ applied: number; total: number } | null>(null)
 
   // Статистика
   type StatsPeriod = 'month' | 'quarter' | 'year'
@@ -753,6 +760,38 @@ export function ScheduleGrid() {
   const unitLabel = payModel === 'cpc' ? 'за клик' : 'за 1000 показов'
   const baseLabel =
     payModel === 'cpc' ? 'Базовая ставка за клик, ₽' : 'Базовая ставка за 1000 показов, ₽'
+
+  // Конвертация текущего дня сетки в формат WB (0-100 на каждый час)
+  function gridToWbHours(dayIdx: number): number[] {
+    return grid[dayIdx].map(pct => pct === 0 ? 0 : Math.min(100, pct))
+  }
+
+  function toggleApplyCampaign(id: number) {
+    setApplySelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+
+  function toggleApplyAll() {
+    setApplySelected(prev =>
+      prev.size === campaigns.length
+        ? new Set()
+        : new Set(campaigns.map(c => c.advert_id))
+    )
+  }
+
+  async function handleApplyToRK() {
+    if (!selectedAccountId || applySelected.size === 0) return
+    setApplying(true)
+    setApplyResult(null)
+    try {
+      const hours = gridToWbHours(applyDayIndex)
+      const res = await campaignsApi.bulkSchedule(selectedAccountId, [...applySelected], hours)
+      setApplyResult(res)
+    } catch {
+      setApplyResult(null)
+    } finally {
+      setApplying(false)
+    }
+  }
 
   return (
     <div className="schedule" onMouseLeave={() => setPainting(false)}>
@@ -1608,6 +1647,116 @@ export function ScheduleGrid() {
           </span>
         )}
       </div>
+
+      {/* ── Применить расписание к РК WB ─────────────────────────────── */}
+      {platform === 'wb' && selectedAccountId && (
+        <div style={{ marginTop: 24, background: '#1e293b', borderRadius: 12, border: '1px solid #334155', overflow: 'hidden' }}>
+          <button
+            onClick={() => setApplyPanelOpen(o => !o)}
+            style={{ width: '100%', background: 'none', border: 'none', padding: '14px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+          >
+            <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14 }}>
+              📣 Применить это расписание к рекламным кампаниям WB
+            </span>
+            <span style={{ color: '#64748b', fontSize: 12 }}>{applyPanelOpen ? '▲ свернуть' : '▼ развернуть'}</span>
+          </button>
+
+          {applyPanelOpen && (
+            <div style={{ padding: '0 20px 20px' }}>
+              {/* Выбор дня */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <span style={{ color: '#94a3b8', fontSize: 13 }}>Использовать часы из дня:</span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {DAYS.map((d, i) => (
+                    <button
+                      key={d}
+                      onClick={() => setApplyDayIndex(i)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600,
+                        background: applyDayIndex === i ? '#38bdf8' : '#0f172a',
+                        color: applyDayIndex === i ? '#0f172a' : '#64748b',
+                        border: `1px solid ${applyDayIndex === i ? '#38bdf8' : '#334155'}`,
+                      }}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <span style={{ color: '#475569', fontSize: 11 }}>
+                  Активных часов: {grid[applyDayIndex].filter(p => p > 0).length}/24
+                </span>
+              </div>
+
+              {/* Список кампаний */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#94a3b8', fontSize: 13 }}>
+                  Кампании ({applySelected.size} выбрано из {campaigns.length}):
+                </span>
+                <button
+                  onClick={toggleApplyAll}
+                  style={{ background: 'none', border: '1px solid #334155', color: '#94a3b8', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 12 }}
+                >
+                  {applySelected.size === campaigns.length && campaigns.length > 0 ? 'Снять всё' : 'Выбрать все'}
+                </button>
+              </div>
+
+              {campaignsLoading ? (
+                <div style={{ color: '#64748b', fontSize: 13, padding: '8px 0' }}>Загрузка кампаний...</div>
+              ) : campaigns.length === 0 ? (
+                <div style={{ color: '#64748b', fontSize: 13, padding: '8px 0' }}>
+                  Нет кампаний. Выбери аккаунт и кампанию выше — они загрузятся автоматически.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 4, maxHeight: 240, overflowY: 'auto', marginBottom: 16 }}>
+                  {campaigns.map(c => (
+                    <label key={c.advert_id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
+                      background: applySelected.has(c.advert_id) ? '#1e3a5f' : '#0f172a',
+                      borderRadius: 6, cursor: 'pointer',
+                      border: `1px solid ${applySelected.has(c.advert_id) ? '#38bdf8' : '#1e293b'}`,
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={applySelected.has(c.advert_id)}
+                        onChange={() => toggleApplyCampaign(c.advert_id)}
+                        style={{ accentColor: '#38bdf8', flexShrink: 0 }}
+                      />
+                      <span style={{ color: c.status === 9 ? '#22c55e' : '#f59e0b', fontSize: 11, flexShrink: 0 }}>
+                        {c.status === 9 ? '▶' : '⏸'}
+                      </span>
+                      <span style={{ color: '#f1f5f9', fontSize: 13, flex: 1 }}>{c.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {applyResult && (
+                <div style={{ background: applyResult.applied === applyResult.total ? '#052e16' : '#451a03', color: applyResult.applied === applyResult.total ? '#86efac' : '#fca5a5', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                  {applyResult.applied === applyResult.total
+                    ? `✅ Расписание применено ко всем ${applyResult.applied} кампаниям`
+                    : `⚠ Применено к ${applyResult.applied} из ${applyResult.total} — часть кампаний вернула ошибку WB API`}
+                </div>
+              )}
+
+              <button
+                onClick={handleApplyToRK}
+                disabled={applying || applySelected.size === 0}
+                style={{
+                  background: applying || applySelected.size === 0 ? '#334155' : '#38bdf8',
+                  color: '#0f172a', border: 'none', borderRadius: 8,
+                  padding: '10px 24px', fontWeight: 700,
+                  cursor: applying || applySelected.size === 0 ? 'not-allowed' : 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                {applying
+                  ? '⟳ Применяем...'
+                  : `📅 Применить к ${applySelected.size || '...'} кампани${applySelected.size === 1 ? 'и' : 'ям'}`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
