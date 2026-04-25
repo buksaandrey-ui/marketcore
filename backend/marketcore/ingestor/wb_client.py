@@ -128,114 +128,55 @@ class WBClient:
     async def list_campaigns(self, statuses: list[int] | None = None) -> list[dict]:
         """Список рекламных кампаний (активные + приостановленные).
 
-        Шаг 1: GET /adv/v1/promotion/count   → ID кампаний сгруппированные по типу/статусу
-        Шаг 2: POST /adv/v1/promotion/adverts → детали по массиву ID
+        GET /adv/v1/promotion/count → возвращает ID кампаний сгруппированные по типу/статусу.
+        WB убрал endpoint для получения деталей, поэтому показываем ID как имя кампании.
         """
-        import logging as _log
-        _logger = _log.getLogger(__name__)
-
         if statuses is None:
             statuses = [9, 11]  # 9=активна, 11=на паузе
 
-        # ── Шаг 1: получаем все ID кампаний ─────────────────────────────────
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp1 = await client.get(
+            resp = await client.get(
                 f"{WB_ADV_BASE}/adv/v1/promotion/count",
                 headers=self._headers,
             )
-            _logger.info("[wb_campaigns] count http=%d body=%.300s", resp1.status_code, resp1.text)
-            resp1.raise_for_status()
-            count_data = resp1.json()
+            resp.raise_for_status()
+            count_data = resp.json()
 
         all_adverts = count_data.get("adverts") or []
 
-        # Ответ: {"adverts": [{"type":8,"status":9,"count":3,"advert_list":[{"advertId":123,...},...]},...]}
-        advert_ids = []
+        # Ответ: {"adverts": [{"type":8,"status":9,"count":3,"advert_list":[{"advertId":123,"changeTime":"..."},...]},...]}
+        TYPE_LABELS = {4: "Каталог", 5: "Карточка", 6: "Поиск", 7: "Рекомендации", 8: "Авто", 9: "Поиск+Каталог"}
+        STATUS_LABELS = {9: "▶ Активна", 11: "⏸ Пауза"}
+
+        result = []
         for group in all_adverts:
             if not isinstance(group, dict):
                 continue
-            if group.get("status") not in statuses:
+            grp_status = group.get("status")
+            if grp_status not in statuses:
                 continue
+            grp_type = group.get("type")
+            type_label = TYPE_LABELS.get(grp_type, f"Тип {grp_type}")
+            status_label = STATUS_LABELS.get(grp_status, "")
+
             for item in (group.get("advert_list") or []):
                 if isinstance(item, dict):
                     aid = item.get("advertId")
                 else:
-                    aid = item  # иногда просто число
-                if aid:
-                    advert_ids.append(int(aid))
+                    aid = item
+                if not aid:
+                    continue
+                result.append({
+                    "advert_id": int(aid),
+                    "name": f"{type_label} #{aid} {status_label}",
+                    "type": grp_type,
+                    "status": grp_status,
+                    "cpm": 0,
+                    "subject_id": None,
+                    "menu_id": None,
+                })
 
-        if not advert_ids:
-            return []
-
-        advert_ids = advert_ids[:50]  # API принимает максимум 50
-
-        # ── Шаг 2: детали кампаний через POST ────────────────────────────────
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp2 = await client.post(
-                f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
-                headers=self._headers,
-                json=advert_ids,  # тело: [123, 456, ...]
-            )
-            _logger.info("[wb_campaigns] details http=%d body=%.500s", resp2.status_code, resp2.text)
-            if resp2.status_code == 422:
-                # fallback: возвращаем ID без имён
-                return [
-                    {"advert_id": aid, "name": f"Кампания #{aid}", "type": None,
-                     "status": 9, "cpm": 0, "subject_id": None, "menu_id": None}
-                    for aid in advert_ids
-                ]
-            resp2.raise_for_status()
-            detail_data = resp2.json()
-
-        # Ответ — напрямую массив объектов кампаний
-        if isinstance(detail_data, list):
-            detail_items = detail_data
-        elif isinstance(detail_data, dict):
-            detail_items = detail_data.get("adverts") or []
-        else:
-            detail_items = []
-
-        if not detail_items:
-            _logger.warning("[wb_campaigns] details вернул пустой список, строим из advert_ids")
-            return [
-                {"advert_id": aid, "name": f"Кампания #{aid}", "type": None,
-                 "status": 9, "cpm": 0, "subject_id": None, "menu_id": None}
-                for aid in advert_ids
-            ]
-
-        result = []
-        for item in detail_items:
-            if not isinstance(item, dict):
-                continue
-
-            advert_id = (
-                item.get("advertId")
-                or item.get("advert_id")
-                or item.get("id")
-            )
-            name = (
-                item.get("name")
-                or item.get("campName")
-                or item.get("title")
-                or f"Кампания #{advert_id}"
-            )
-
-            params_list = item.get("params") or item.get("unitedParams") or []
-            subject_id = None
-            if isinstance(params_list, list) and params_list:
-                first = params_list[0] if isinstance(params_list[0], dict) else {}
-                subj = first.get("subject") or {}
-                subject_id = subj.get("id") if isinstance(subj, dict) else None
-
-            result.append({
-                "advert_id": advert_id,
-                "name": name,
-                "type": item.get("type"),
-                "status": item.get("status"),
-                "cpm": item.get("cpm", 0),
-                "subject_id": subject_id,
-                "menu_id": None,
-            })
+        return result[:50]
         return result
 
     async def set_campaign_cpm(
