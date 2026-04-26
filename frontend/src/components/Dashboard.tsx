@@ -142,12 +142,14 @@ export function Dashboard() {
           <div className="kpi-sub">После возвратов</div>
           {isDemo && <div className="kpi-delta pos">▲ 8.1% vs вчера</div>}
         </div>
-        <div className="kpi-card">
-          <div className="kpi-top"><span className="kpi-icon">👆</span><span className="kpi-label">CTR средний</span></div>
-          <div className="kpi-value">{totalCtr.toFixed(1)} <span className="kpi-unit">%</span></div>
-          <div className="kpi-sub">По всем SKU</div>
-          {isDemo && <div className="kpi-delta neg">▼ 0.3 пп vs вчера</div>}
-        </div>
+        {isDemo && (
+          <div className="kpi-card">
+            <div className="kpi-top"><span className="kpi-icon">👆</span><span className="kpi-label">CTR средний</span></div>
+            <div className="kpi-value">{totalCtr.toFixed(1)} <span className="kpi-unit">%</span></div>
+            <div className="kpi-sub">По всем SKU</div>
+            <div className="kpi-delta neg">▼ 0.3 пп vs вчера</div>
+          </div>
+        )}
         <div className="kpi-card kpi-drr">
           <div className="kpi-top"><span className="kpi-icon">📊</span><span className="kpi-label">ДРР (полный)</span></div>
           <div className="kpi-drr-split">
@@ -163,26 +165,30 @@ export function Dashboard() {
               {isDemo && <span className="kpi-delta neg" style={{ fontSize: 11 }}>▲ 1.1 пп</span>}
             </div>
           </div>
-          <div className="kpi-drr-bar">
-            {[
-              { v: totalCpm,   c: '#38bdf8' },
-              { v: totalCpc,   c: '#818cf8' },
-              { v: totalSub,   c: '#34d399' },
-              { v: totalExtra, c: '#fb923c' },
-            ].map(({ v, c }) => (
-              <div key={c} className="kpi-drr-bar-seg" style={{ width: `${(v/totalPromo)*100}%`, background: c }} />
-            ))}
-          </div>
-          <div className="kpi-drr-bar-labels">
-            {[['#38bdf8','CPM'],['#818cf8','CPC'],['#34d399','Подписка'],['#fb923c','Доп.']].map(([c,l]) => (
-              <span key={l} style={{ color: c }}>{l}</span>
-            ))}
-          </div>
+          {isDemo && (
+            <>
+              <div className="kpi-drr-bar">
+                {[
+                  { v: totalCpm,   c: '#38bdf8' },
+                  { v: totalCpc,   c: '#818cf8' },
+                  { v: totalSub,   c: '#34d399' },
+                  { v: totalExtra, c: '#fb923c' },
+                ].map(({ v, c }) => (
+                  <div key={c} className="kpi-drr-bar-seg" style={{ width: `${(v/totalPromo)*100}%`, background: c }} />
+                ))}
+              </div>
+              <div className="kpi-drr-bar-labels">
+                {[['#38bdf8','CPM'],['#818cf8','CPC'],['#34d399','Подписка'],['#fb923c','Доп.']].map(([c,l]) => (
+                  <span key={l} style={{ color: c }}>{l}</span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* ── ДРР Аналитика ────────────────────────────────────── */}
-      <div className="drr-widget">
+      {/* ── ДРР Аналитика (только демо) ─────────────────────── */}
+      {isDemo && <div className="drr-widget">
         <div className="drr-widget-header">
           <h2 className="drr-widget-title">📊 ДРР: Полная аналитика</h2>
           <div className="drr-tabs">
@@ -274,10 +280,10 @@ export function Dashboard() {
             )}
           </div>
         </div>
-      </div>
+      </div>}
 
-      {/* ── Таблица SKU ──────────────────────────────────────── */}
-      <div className="sku-table-wrap">
+      {/* ── Таблица SKU (демо) ───────────────────────────────── */}
+      {isDemo && <div className="sku-table-wrap">
         <div className="sku-table-header">
           <h2 className="sku-table-title">Товары</h2>
           <div className="sku-search-box">
@@ -337,7 +343,46 @@ export function Dashboard() {
           Расходы на продвижение: ₽ {fmt(totalPromo)} ·
           ДРР к выручке: <b>{fmtPct(globalDrrR)}</b> · Данные демо
         </div>
-      </div>
+      </div>}
+
+      {/* ── Топ товаров (реальные данные) ────────────────────── */}
+      {!isDemo && realData?.top_skus && realData.top_skus.length > 0 && (
+        <div className="sku-table-wrap">
+          <div className="sku-table-header">
+            <h2 className="sku-table-title">Топ товаров</h2>
+          </div>
+          <div className="sku-table-scroll">
+            <table className="sku-table">
+              <thead>
+                <tr>
+                  <th className="col-name">Артикул</th>
+                  <th className="col-num">Заказов</th>
+                  <th className="col-num">Выручка</th>
+                </tr>
+              </thead>
+              <tbody>
+                {realData.top_skus.map(s => (
+                  <tr key={s.sku} className="sku-row status-ok">
+                    <td className="col-name">
+                      <div className="sku-name">#{s.sku}</div>
+                    </td>
+                    <td className="col-num">{s.orders_count} шт</td>
+                    <td className="col-num">₽ {fmt(s.revenue ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="sku-table-footer">
+            Данные за последние 30 дней · реальные
+          </div>
+        </div>
+      )}
+      {!isDemo && (!realData?.top_skus || realData.top_skus.length === 0) && (
+        <div style={{ background: '#1e293b', borderRadius: 10, padding: 32, textAlign: 'center', color: '#64748b', border: '1px solid #334155' }}>
+          Нет данных по товарам. Нажми <strong>Синхронизировать</strong> в разделе <strong>🏪 Аккаунты</strong>.
+        </div>
+      )}
     </div>
   )
 }

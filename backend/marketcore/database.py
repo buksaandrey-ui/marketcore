@@ -5,7 +5,10 @@ from sqlalchemy.orm import DeclarativeBase
 
 from marketcore.config import settings
 
-engine = create_async_engine(settings.database_url, echo=settings.debug)
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug and settings.environment == "development",
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 

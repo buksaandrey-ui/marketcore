@@ -112,6 +112,7 @@ async def apply_to_wb(
             advert_type=int(campaign_type),
             cpm=cpm_int,
             param=int(campaign_param),
+            instrument=0,
         )
         logger.info(
             "[applier] campaign_id=%s: поставил CPM=%d (target=%.2f)",

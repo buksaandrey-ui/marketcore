@@ -39,3 +39,8 @@ async def refresh(body: RefreshTokenRequest, db: AsyncSession = Depends(get_db))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(body: RefreshTokenRequest, db: AsyncSession = Depends(get_db)) -> None:
+    await service.logout_user(db, body.refresh_token)

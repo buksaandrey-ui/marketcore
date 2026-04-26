@@ -134,7 +134,7 @@ async def get_benchmarks(
     since = datetime.now(timezone.utc) - timedelta(days=30)
     avg_q = await db.execute(
         select(func.avg(AdStat.cpm))
-        .where(AdStat.account_id == str(account_id))
+        .where(AdStat.account_id == account_id)
         .where(AdStat.cpm > 0)
         .where(AdStat.stat_date >= since)
     )

@@ -16,16 +16,14 @@ from datetime import datetime, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from marketcore.bidding.executor import evaluate_schedule
-from marketcore.config import settings
+from marketcore.database import AsyncSessionLocal
 from marketcore.models import RuleExecution, Schedule
 
 logger = logging.getLogger(__name__)
 
-_engine = create_async_engine(settings.database_url)
-_session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+_session_factory = AsyncSessionLocal
 
 _scheduler: AsyncIOScheduler | None = None
 

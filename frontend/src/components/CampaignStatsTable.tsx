@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { accountsApi, campaignsApi, type Account, type CampaignStat, type WbCampaign } from '../api'
+import { accountsApi, campaignsApi, accountPrefs, type Account, type CampaignStat, type WbCampaign, type OverallDrrData } from '../api'
 
 type SortKey = keyof CampaignStat
 type SortDir = 'asc' | 'desc'
@@ -32,18 +32,33 @@ export function CampaignStatsTable() {
   const [editName, setEditName] = useState('')
   const [editBudget, setEditBudget] = useState('')
   const [actionMsg, setActionMsg] = useState('')
+  const [overallDrr, setOverallDrr] = useState<OverallDrrData | null>(null)
+  const [overallDays, setOverallDays] = useState(30)
+  const [overallOpen, setOverallOpen] = useState(false)
+
+  function pickAccount(id: string) { setAccountId(id); accountPrefs.set(id) }
 
   useEffect(() => {
     accountsApi.list().then(a => {
       const wb = a.filter(x => x.marketplace === 'wb')
       setAccounts(wb)
-      if (wb.length) setAccountId(wb[0].id)
+      const saved = accountPrefs.get()
+      const pick = wb.find(x => x.id === saved) ?? wb[0]
+      if (pick) pickAccount(pick.id)
     })
   }, [])
 
   useEffect(() => {
     if (accountId) { loadStats(); loadCampaigns() }
   }, [accountId, days])
+
+  useEffect(() => {
+    if (accountId) loadOverallDrr()
+  }, [accountId, overallDays])
+
+  async function loadOverallDrr() {
+    try { setOverallDrr(await campaignsApi.overallDrr(accountId, overallDays)) } catch { /* silent */ }
+  }
 
   async function loadStats() {
     setLoading(true); setError('')
@@ -121,7 +136,7 @@ export function CampaignStatsTable() {
 
         <select
           value={accountId}
-          onChange={e => setAccountId(e.target.value)}
+          onChange={e => pickAccount(e.target.value)}
           style={{ background: '#1e293b', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13 }}
         >
           {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -154,13 +169,13 @@ export function CampaignStatsTable() {
         </div>
       )}
 
-      {/* Итого */}
+      {/* Итого по рекламным кампаниям */}
       {stats.length > 0 && (
         <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
           {[
-            { label: 'Расход', val: `${fmt(totalSpend)} ₽`, color: '#ef4444' },
-            { label: 'Доход', val: `${fmt(totalRevenue)} ₽`, color: '#22c55e' },
-            { label: 'Общий ДРР', val: totalDrr != null ? `${totalDrr.toFixed(1)}%` : '—', color: drrColor(totalDrr) },
+            { label: 'Расход (реклама)', val: `${fmt(totalSpend)} ₽`, color: '#ef4444' },
+            { label: 'Доход (реклама)', val: `${fmt(totalRevenue)} ₽`, color: '#22c55e' },
+            { label: 'ДРР по рекламе', val: totalDrr != null ? `${totalDrr.toFixed(1)}%` : '—', color: drrColor(totalDrr) },
             { label: 'Кампаний', val: String(stats.length), color: '#94a3b8' },
           ].map(s => (
             <div key={s.label} style={{ background: '#1e293b', borderRadius: 8, padding: '8px 14px', border: '1px solid #334155' }}>
@@ -168,6 +183,86 @@ export function CampaignStatsTable() {
               <div style={{ color: s.color, fontWeight: 700, fontSize: 16 }}>{s.val}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Общий ДРР (реальные данные) */}
+      {overallDrr && (
+        <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 10, marginBottom: 16 }}>
+          {/* Шапка виджета */}
+          <div
+            onClick={() => setOverallOpen(o => !o)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 700 }}>📊 ОБЩИЙ ДРР</span>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                {[30, 60, 90].map(d => (
+                  <button key={d} onClick={e => { e.stopPropagation(); setOverallDays(d) }} style={{
+                    padding: '2px 10px', borderRadius: 4, fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                    background: overallDays === d ? '#38bdf8' : '#1e293b',
+                    color: overallDays === d ? '#0f172a' : '#64748b',
+                    border: `1px solid ${overallDays === d ? '#38bdf8' : '#334155'}`,
+                  }}>{d} дн.</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: '#64748b', fontSize: 11 }}>ДРР только реклама</div>
+                <div style={{ color: drrColor(overallDrr.drr_ad), fontWeight: 700, fontSize: 18 }}>
+                  {overallDrr.drr_ad != null ? `${overallDrr.drr_ad}%` : '—'}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: '#64748b', fontSize: 11 }}>Общий ДРР (всё вкл.)</div>
+                <div style={{ color: drrColor(overallDrr.drr_total), fontWeight: 700, fontSize: 22 }}>
+                  {overallDrr.drr_total != null ? `${overallDrr.drr_total}%` : '—'}
+                </div>
+              </div>
+              <span style={{ color: '#475569', fontSize: 16 }}>{overallOpen ? '▲' : '▼'}</span>
+            </div>
+          </div>
+
+          {/* Разворачиваемые детали */}
+          {overallOpen && (
+            <div style={{ padding: '0 16px 16px', borderTop: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
+                {[
+                  { label: 'Рекл. расход', val: `${fmt(overallDrr.ad_spend, 2)} ₽`, color: '#ef4444' },
+                  { label: 'Услуги WB (продвижение)', val: `${fmt(overallDrr.service_costs, 2)} ₽`, color: '#f59e0b' },
+                  { label: 'Итого расходов', val: `${fmt(overallDrr.total_costs, 2)} ₽`, color: '#f97316' },
+                  { label: 'Вся выручка (органика+реклама)', val: `${fmt(overallDrr.total_revenue, 2)} ₽`, color: '#22c55e' },
+                ].map(s => (
+                  <div key={s.label} style={{ background: '#1e293b', borderRadius: 8, padding: '8px 14px', border: '1px solid #334155', minWidth: 160 }}>
+                    <div style={{ color: '#64748b', fontSize: 11 }}>{s.label}</div>
+                    <div style={{ color: s.color, fontWeight: 700, fontSize: 15 }}>{s.val}</div>
+                  </div>
+                ))}
+              </div>
+              {Object.keys(overallDrr.by_service).length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ color: '#64748b', fontSize: 11, marginBottom: 6 }}>РАЗБИВКА УСЛУГ WB</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {Object.entries(overallDrr.by_service).map(([name, val]) => (
+                      <div key={name} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '5px 10px', fontSize: 12 }}>
+                        <span style={{ color: '#94a3b8' }}>{name}: </span>
+                        <span style={{ color: '#f59e0b', fontWeight: 700 }}>{fmt(val as number, 2)} ₽</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {overallDrr.services_error && (
+                <div style={{ color: '#64748b', fontSize: 11, marginTop: 8 }}>
+                  ⚠ Услуги WB недоступны: {overallDrr.services_error}
+                </div>
+              )}
+              <div style={{ color: '#475569', fontSize: 11, marginTop: 10 }}>
+                Общий ДРР = (рекл. расход + услуги WB) / вся выручка × 100% · период {overallDrr.period_days} дн.
+              </div>
+            </div>
+          )}
         </div>
       )}
 

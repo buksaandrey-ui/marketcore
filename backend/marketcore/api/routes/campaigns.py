@@ -15,7 +15,7 @@ from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.accounts import service as acc_service
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import AdStat, SkuPrice, SkuStock, User
+from marketcore.models import AdStat, Order, SkuPrice, SkuStock, User
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -157,6 +157,22 @@ async def update_campaign(
         raise HTTPException(status_code=502, detail=f"WB API: {e}")
 
 
+class SetCpmBody(BaseModel):
+    account_id: uuid.UUID
+    cpm: int
+    advert_type: int = 8    # 8=авто, 5=поиск, 9=поиск+каталог
+    param: int = 0          # subject_id для поиска, 0 для авто
+
+
+class CreateCategoryPackBody(BaseModel):
+    account_id: uuid.UUID
+    nm_ids: list[int]           # один nm_id = одна кампания
+    name_prefix: str            # «Удобрение» → «Удобрение — {nm_id}»
+    budget: int = 500
+    cpm: int = 150              # стартовая ставка
+    schedule_hours: list[int]   # 24 значения 0-100
+
+
 class CampaignStatOut(BaseModel):
     advert_id: int
     name: str
@@ -256,6 +272,75 @@ async def bulk_set_schedule(
     return {"applied": ok_count, "total": len(body.advert_ids), "details": results}
 
 
+@router.get("/overall-drr")
+async def get_overall_drr(
+    account_id: uuid.UUID = Query(...),
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Общий ДРР = (рекламный расход + WB-услуги продвижения) / вся выручка × 100%.
+
+    Компоненты:
+      ad_spend      — рекламный расход из таблицы ad_stats за период
+      service_costs — доп. услуги WB (Продвижение, Реклама WB и т.п.) из финотчёта
+      total_revenue — вся выручка из таблицы orders (органика + реклама)
+      drr_ad        — ДРР только рекламы
+      drr_total     — Общий ДРР (реклама + услуги) / вся выручка
+      by_service    — разбивка доп. расходов по типу услуги
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    since = _dt.now(_tz.utc) - _td(days=days)
+    date_from = since.strftime("%Y-%m-%d")
+    date_to   = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    # 1. Рекламный расход из нашей БД (уже синхронизирован)
+    ad_spend_q = await db.execute(
+        select(func.coalesce(func.sum(AdStat.spend), 0.0))
+        .where(AdStat.account_id == account_id)
+        .where(AdStat.stat_date >= since)
+    )
+    ad_spend = float(ad_spend_q.scalar() or 0)
+
+    # 2. Вся выручка из заказов (органика + реклама)
+    revenue_q = await db.execute(
+        select(func.coalesce(func.sum(Order.price * Order.quantity), 0.0))
+        .where(Order.account_id == account_id)
+        .where(Order.ordered_at >= since)
+    )
+    total_revenue = float(revenue_q.scalar() or 0)
+
+    # 3. Доп. услуги WB из финансового отчёта (тихо падаем если нет доступа)
+    service_costs = 0.0
+    by_service: dict[str, float] = {}
+    services_error: str | None = None
+    try:
+        account = await acc_service.get_account(db, account_id, current_user.id)
+        from marketcore.ingestor.wb_client import WBClient
+        client = WBClient(decrypt_api_key(account.api_key_cipher))
+        svc = await client.get_wb_services_costs(date_from, date_to)
+        service_costs = svc["total"]
+        by_service = svc["by_type"]
+    except Exception as e:
+        services_error = str(e)
+
+    total_costs = ad_spend + service_costs
+    drr_ad    = round(ad_spend / total_revenue * 100, 2) if total_revenue > 0 else None
+    drr_total = round(total_costs / total_revenue * 100, 2) if total_revenue > 0 else None
+
+    return {
+        "period_days":    days,
+        "ad_spend":       round(ad_spend, 2),
+        "service_costs":  round(service_costs, 2),
+        "total_costs":    round(total_costs, 2),
+        "total_revenue":  round(total_revenue, 2),
+        "drr_ad":         drr_ad,
+        "drr_total":      drr_total,
+        "by_service":     by_service,
+        "services_error": services_error,
+    }
+
+
 @router.get("/skus", response_model=list[SkuOut])
 async def list_skus(
     account_id: uuid.UUID = Query(...),
@@ -268,12 +353,10 @@ async def list_skus(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    account_id_str = str(account_id)
-
     # Берём уникальные SKU с последней ценой
     prices_q = (
         select(SkuPrice.sku, func.max(SkuPrice.price).label("price"))
-        .where(SkuPrice.account_id == account_id_str)
+        .where(SkuPrice.account_id == account_id)
         .group_by(SkuPrice.sku)
     )
     prices_rows = (await db.execute(prices_q)).all()
@@ -282,7 +365,7 @@ async def list_skus(
     # Суммарный остаток по всем складам
     stocks_q = (
         select(SkuStock.sku, func.sum(SkuStock.quantity).label("stock"))
-        .where(SkuStock.account_id == account_id_str)
+        .where(SkuStock.account_id == account_id)
         .group_by(SkuStock.sku)
     )
     stocks_rows = (await db.execute(stocks_q)).all()
@@ -309,3 +392,119 @@ async def list_skus(
         )
         for s in all_skus
     ]
+
+
+@router.post("/{advert_id}/set-cpm", status_code=204)
+async def set_campaign_cpm(
+    advert_id: int,
+    body: SetCpmBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Установить ставку CPM для кампании."""
+    _, client = await _get_advert_client(body.account_id, current_user, db)
+    try:
+        await client.set_campaign_cpm(
+            advert_id=advert_id,
+            advert_type=body.advert_type,
+            cpm=body.cpm,
+            param=body.param,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"WB API: {e}")
+
+
+@router.get("/products-by-subject", response_model=list[dict])
+async def list_products_by_subject(
+    account_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Все товары аккаунта с категориями из WB Content API.
+    Возвращает список категорий, каждая содержит список товаров.
+    """
+    try:
+        account = await acc_service.get_account(db, account_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    from marketcore.ingestor.wb_client import WBClient
+    client = WBClient(decrypt_api_key(account.api_key_cipher))
+    try:
+        products = await client.get_all_products_with_subjects()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"WB Content API: {e}")
+
+    # Группируем по категории
+    subjects: dict[str, dict] = {}
+    for p in products:
+        subj = p["subject_name"]
+        if subj not in subjects:
+            subjects[subj] = {
+                "subject_name": subj,
+                "subject_id": p["subject_id"],
+                "products": [],
+            }
+        subjects[subj]["products"].append({
+            "nm_id": p["nm_id"],
+            "name": p["name"],
+            "vendor_code": p["vendor_code"],
+        })
+
+    return sorted(subjects.values(), key=lambda x: x["subject_name"])
+
+
+@router.post("/create-category-pack", response_model=dict, status_code=201)
+async def create_category_pack(
+    body: CreateCategoryPackBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Создать одну кампанию на каждый товар: авто-кампания + CPM + расписание.
+
+    Для каждого nm_id:
+      1. Создаёт авто-кампанию
+      2. Устанавливает ставку CPM
+      3. Применяет расписание показов
+    """
+    if len(body.schedule_hours) != 24:
+        raise HTTPException(status_code=400, detail="schedule_hours должен содержать ровно 24 элемента")
+
+    _, client = await _get_advert_client(body.account_id, current_user, db)
+
+    created: list[dict] = []
+    errors: list[dict] = []
+
+    for nm_id in body.nm_ids:
+        name = f"{body.name_prefix} — {nm_id}"
+        try:
+            advert_id = await client.create_auto_campaign([nm_id], body.budget, name)
+        except Exception as e:
+            errors.append({"nm_id": nm_id, "step": "create", "error": str(e)})
+            continue
+
+        # Ставка CPM
+        try:
+            await client.set_campaign_cpm(
+                advert_id=advert_id,
+                advert_type=8,  # авто-кампания
+                cpm=body.cpm,
+                param=0,
+            )
+        except Exception as e:
+            errors.append({"nm_id": nm_id, "advert_id": advert_id, "step": "set_cpm", "error": str(e)})
+
+        # Расписание
+        try:
+            await client.set_campaign_hours(advert_id, body.schedule_hours)
+        except Exception as e:
+            errors.append({"nm_id": nm_id, "advert_id": advert_id, "step": "schedule", "error": str(e)})
+
+        created.append({"nm_id": nm_id, "advert_id": advert_id, "name": name})
+
+    return {
+        "created_count": len(created),
+        "error_count": len(errors),
+        "campaigns": created,
+        "errors": errors,
+    }

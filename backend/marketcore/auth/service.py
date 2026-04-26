@@ -74,6 +74,16 @@ async def login_user(db: AsyncSession, email: str, password: str) -> tuple[str, 
     return create_access_token(user.id), refresh_token
 
 
+async def logout_user(db: AsyncSession, refresh_token: str) -> None:
+    """Деактивировать сессию по refresh_token. Если токен не найден — игнорируем."""
+    db_session = await db.scalar(
+        select(Session).where(Session.refresh_token == refresh_token, Session.is_active == True)  # noqa: E712
+    )
+    if db_session:
+        db_session.is_active = False
+        await db.commit()
+
+
 async def refresh_tokens(db: AsyncSession, refresh_token: str) -> tuple[str, str]:
     payload = decode_token(refresh_token)
     if payload.get("type") != "refresh":

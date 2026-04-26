@@ -1,18 +1,16 @@
 import { useState } from 'react'
-import { Dashboard }          from './components/Dashboard'
-import { UnitEcon }           from './components/UnitEcon'
-import { SupplyForecast }     from './components/SupplyForecast'
-import { ScheduleGrid }       from './components/ScheduleGrid'
-import { CampaignStatsTable } from './components/CampaignStatsTable'
-import { LoginPage }          from './components/LoginPage'
-import AccountsPage           from './components/AccountsPage'
-import { BehaviorPage }       from './components/BehaviorPage'
-import { ReportsPage }        from './components/ReportsPage'
-import { BotHistoryPage }     from './components/BotHistoryPage'
+import { Dashboard }           from './components/Dashboard'
+import { UnitEcon }            from './components/UnitEcon'
+import { SupplyForecast }      from './components/SupplyForecast'
+import { WbCampaignManager }   from './components/WbCampaignManager'
+import { LoginPage }           from './components/LoginPage'
+import AccountsPage            from './components/AccountsPage'
+import { BehaviorPage }        from './components/BehaviorPage'
+import { ReportsPage }         from './components/ReportsPage'
+import { BotHistoryPage }      from './components/BotHistoryPage'
 import './App.css'
 
 type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'bot-history' | 'accounts' | 'behavior' | 'reports'
-type BiddingTab = 'campaigns' | 'schedule'
 
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard',   icon: '📊', label: 'Дашборд'        },
@@ -30,7 +28,6 @@ export default function App() {
     Boolean(localStorage.getItem('mc_token'))
   )
   const [page, setPage] = useState<Page>('dashboard')
-  const [biddingTab, setBiddingTab] = useState<BiddingTab>('campaigns')
 
   const handleLogin  = () => setIsLoggedIn(true)
   const handleLogout = () => {
@@ -73,36 +70,7 @@ export default function App() {
         {page === 'reports'     && <ReportsPage />}
         {page === 'accounts'    && <AccountsPage />}
 
-        {page === 'bidding' && (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            {/* Вкладки */}
-            <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #334155', background: '#0f172a', flexShrink: 0 }}>
-              {([
-                { id: 'campaigns', label: '📊 Кампании и статистика' },
-                { id: 'schedule',  label: '⏱ Расписание ставок' },
-              ] as { id: BiddingTab; label: string }[]).map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setBiddingTab(t.id)}
-                  style={{
-                    padding: '12px 24px', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600,
-                    background: biddingTab === t.id ? '#1e293b' : 'transparent',
-                    color: biddingTab === t.id ? '#f1f5f9' : '#64748b',
-                    borderBottom: biddingTab === t.id ? '2px solid #38bdf8' : '2px solid transparent',
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Содержимое вкладки */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: biddingTab === 'campaigns' ? '24px' : '0' }}>
-              {biddingTab === 'campaigns' && <CampaignStatsTable />}
-              {biddingTab === 'schedule'  && <ScheduleGrid />}
-            </div>
-          </div>
-        )}
+        {page === 'bidding' && <WbCampaignManager />}
       </main>
     </div>
   )

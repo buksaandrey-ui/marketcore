@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { accountsApi, benchmarksApi, campaignsApi, schedulesApi, type Account } from '../api'
+import { accountsApi, benchmarksApi, campaignsApi, schedulesApi, accountPrefs, type Account } from '../api'
 import './ScheduleGrid.css'
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
@@ -349,7 +349,12 @@ export function ScheduleGrid() {
 
   // Загружаем список подключённых аккаунтов при монтировании
   useEffect(() => {
-    accountsApi.list().then(setAccounts).catch(() => {})
+    accountsApi.list().then(list => {
+      setAccounts(list)
+      const saved = accountPrefs.get()
+      const pick = list.find(a => a.id === saved)
+      if (pick) setSelectedAccountId(pick.id)
+    }).catch(() => {})
     // Удаляем старые API-ключи из localStorage если они там ещё есть
     localStorage.removeItem('mc_wb_key')
     localStorage.removeItem('mc_oz_cid')
@@ -1194,7 +1199,7 @@ export function ScheduleGrid() {
                 <span>Аккаунт {platform.toUpperCase()}</span>
                 <select
                   value={selectedAccountId}
-                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                  onChange={(e) => { setSelectedAccountId(e.target.value); accountPrefs.set(e.target.value) }}
                   style={{ background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13 }}
                 >
                   <option value="">— Выбери аккаунт —</option>

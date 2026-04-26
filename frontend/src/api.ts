@@ -41,9 +41,49 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+
+  /** Выйти — деактивирует сессию на сервере, очищает localStorage */
+  logout: async (): Promise<void> => {
+    const rt = localStorage.getItem('mc_refresh_token')
+    if (rt) {
+      await apiFetch<null>('/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: rt }),
+      }).catch(() => {})
+    }
+    localStorage.removeItem('mc_token')
+    localStorage.removeItem('mc_refresh_token')
+  },
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+let _refreshing: Promise<boolean> | null = null
+
+async function tryRefreshToken(): Promise<boolean> {
+  if (_refreshing) return _refreshing
+  _refreshing = (async () => {
+    const rt = localStorage.getItem('mc_refresh_token')
+    if (!rt) return false
+    try {
+      const res = await fetch(BASE_URL + '/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+      })
+      if (!res.ok) return false
+      const data: TokenPair = await res.json()
+      localStorage.setItem('mc_token', data.access_token)
+      localStorage.setItem('mc_refresh_token', data.refresh_token)
+      return true
+    } catch {
+      return false
+    } finally {
+      _refreshing = null
+    }
+  })()
+  return _refreshing
+}
+
+async function apiFetch<T>(path: string, options: RequestInit = {}, _retry = true): Promise<T> {
   const token = getToken()
   const res = await fetch(BASE_URL + path, {
     ...options,
@@ -54,7 +94,9 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     },
   })
   if (!res.ok) {
-    if (res.status === 401) {
+    if (res.status === 401 && _retry) {
+      const refreshed = await tryRefreshToken()
+      if (refreshed) return apiFetch<T>(path, options, false)
       localStorage.removeItem('mc_token')
       localStorage.removeItem('mc_refresh_token')
       window.location.reload()
@@ -231,6 +273,31 @@ export type SkuItem = {
   stock: number | null
 }
 
+export type OverallDrrData = {
+  period_days: number
+  ad_spend: number
+  service_costs: number
+  total_costs: number
+  total_revenue: number
+  drr_ad: number | null
+  drr_total: number | null
+  by_service: Record<string, number>
+  services_error: string | null
+}
+
+export type ProductSubject = {
+  subject_name: string
+  subject_id: number
+  products: { nm_id: number; name: string; vendor_code: string }[]
+}
+
+export type CategoryPackResult = {
+  created_count: number
+  error_count: number
+  campaigns: { nm_id: number; advert_id: number; name: string }[]
+  errors: { nm_id: number; step: string; error: string; advert_id?: number }[]
+}
+
 export const campaignsApi = {
   list: (accountId: string): Promise<WbCampaign[]> =>
     apiFetch<WbCampaign[]>(`/campaigns?account_id=${accountId}`),
@@ -250,11 +317,36 @@ export const campaignsApi = {
   update: (advertId: number, accountId: string, body: { name?: string; budget_add?: number }): Promise<null> =>
     apiFetch<null>(`/campaigns/${advertId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(body) }),
 
+  setCpm: (advertId: number, body: { account_id: string; cpm: number; advert_type?: number; param?: number }): Promise<null> =>
+    apiFetch<null>(`/campaigns/${advertId}/set-cpm`, { method: 'POST', body: JSON.stringify(body) }),
+
   bulkSchedule: (accountId: string, advertIds: number[], hours: number[]): Promise<{ applied: number; total: number; details: Record<string, string> }> =>
     apiFetch(`/campaigns/bulk-schedule`, { method: 'POST', body: JSON.stringify({ account_id: accountId, advert_ids: advertIds, hours }) }),
 
   stats: (accountId: string, days = 7): Promise<CampaignStat[]> =>
     apiFetch<CampaignStat[]>(`/campaigns/stats?account_id=${accountId}&days=${days}`),
+
+  overallDrr: (accountId: string, days = 30): Promise<OverallDrrData> =>
+    apiFetch<OverallDrrData>(`/campaigns/overall-drr?account_id=${accountId}&days=${days}`),
+
+  productsBySubject: (accountId: string): Promise<ProductSubject[]> =>
+    apiFetch<ProductSubject[]>(`/campaigns/products-by-subject?account_id=${accountId}`),
+
+  createCategoryPack: (body: {
+    account_id: string
+    nm_ids: number[]
+    name_prefix: string
+    budget: number
+    cpm: number
+    schedule_hours: number[]
+  }): Promise<CategoryPackResult> =>
+    apiFetch<CategoryPackResult>('/campaigns/create-category-pack', { method: 'POST', body: JSON.stringify(body) }),
+}
+
+/** Запоминает последний выбранный аккаунт между разделами */
+export const accountPrefs = {
+  get: (): string => localStorage.getItem('mc_last_account') ?? '',
+  set: (id: string) => localStorage.setItem('mc_last_account', id),
 }
 
 export type CampaignStat = {

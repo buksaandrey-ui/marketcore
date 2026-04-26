@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { accountsApi, campaignsApi, type Account, type WbCampaign, type SkuItem } from '../api'
+import { accountsApi, campaignsApi, accountPrefs, type Account, type WbCampaign, type SkuItem } from '../api'
 
 type Tab = 'list' | 'create'
 
@@ -35,7 +35,9 @@ export function CampaignsPage() {
     accountsApi.list().then(a => {
       const wb = a.filter(x => x.marketplace === 'wb')
       setAccounts(wb)
-      if (wb.length > 0) setAccountId(wb[0].id)
+      const saved = accountPrefs.get()
+      const pick = wb.find(x => x.id === saved) ?? wb[0]
+      if (pick) setAccountId(pick.id)
     })
   }, [])
 
@@ -198,7 +200,7 @@ export function CampaignsPage() {
         <label style={{ color: '#94a3b8', fontSize: 12 }}>АККАУНТ WB</label>
         <select
           value={accountId}
-          onChange={e => setAccountId(e.target.value)}
+          onChange={e => { setAccountId(e.target.value); accountPrefs.set(e.target.value) }}
           style={{ ...input, marginTop: 4, width: 260 }}
         >
           {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
