@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -187,3 +187,23 @@ class RuleExecution(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="computed")
     reason: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class CampaignAutoSchedule(Base):
+    """Авто-переключение расписания показов кампаний: будни ↔ выходные.
+
+    APScheduler в пятницу 22:00 UTC применяет weekend_hours,
+    в понедельник 06:00 UTC — weekday_hours.
+    """
+    __tablename__ = "campaign_auto_schedules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    advert_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    weekday_hours: Mapped[list] = mapped_column(JSON, nullable=False)   # 24 целых, 0-200
+    weekend_hours: Mapped[list] = mapped_column(JSON, nullable=False)   # 24 целых, 0-200
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+

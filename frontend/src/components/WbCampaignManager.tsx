@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  accountsApi, campaignsApi, accountPrefs,
-  type Account, type CampaignStat, type OverallDrrData, type ProductSubject, type CategoryPackResult,
+  accountsApi, campaignsApi, accountPrefs, autoSchedulesApi,
+  type Account, type CampaignStat, type OverallDrrData, type ProductSubject, type CategoryPackResult, type AutoSchedule,
 } from '../api'
 
 // ─── Константы ───────────────────────────────────────────────────────────────
@@ -513,6 +513,168 @@ function ManageTab({ accountId }: { accountId: string }) {
   )
 }
 
+// ─── Панель: Авто-переключение выходные/будни ────────────────────────────────
+function AutoSchedulePanel({ accountId }: { accountId: string }) {
+  const [configs, setConfigs] = useState<AutoSchedule[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [name, setName] = useState('')
+  const [advertIdsInput, setAdvertIdsInput] = useState('')
+  const [weekdayPreset, setWeekdayPreset] = useState<'2peaks'|'day'|'24h'>('2peaks')
+  const [weekendPreset, setWeekendPreset] = useState<'weekend'|'day'|'24h'>('weekend')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  // Пресет выходного дня: пик 12-20 → 150%, остальное → 80%, ночь → 0
+  const WEEKEND_HOURS = [0,0,0,0,0,0,80,80,80,80,80,80,100,100,100,100,100,100,100,100,80,80,0,0]
+
+  const weekdayHours = weekdayPreset === '2peaks' ? SCHEDULE_2PEAKS
+    : weekdayPreset === 'day' ? SCHEDULE_DAY : SCHEDULE_24H
+  const weekendHours = weekendPreset === 'weekend' ? WEEKEND_HOURS
+    : weekendPreset === 'day' ? SCHEDULE_DAY : SCHEDULE_24H
+
+  function flash(m: string) { setMsg(m); setTimeout(() => setMsg(''), 4000) }
+
+  const load = useCallback(() => {
+    autoSchedulesApi.list(accountId).then(setConfigs).catch(() => {})
+  }, [accountId])
+
+  useEffect(() => { load() }, [load])
+
+  async function handleSave() {
+    if (!name.trim() || !advertIdsInput.trim()) return
+    const advert_ids = advertIdsInput.split(/[\s,]+/).map(Number).filter(Boolean)
+    if (!advert_ids.length) { flash('Введи ID кампаний'); return }
+    setSaving(true)
+    try {
+      await autoSchedulesApi.create({ account_id: accountId, name: name.trim(), advert_ids, weekday_hours: weekdayHours, weekend_hours: weekendHours })
+      flash('✅ Авто-расписание сохранено'); setShowForm(false); setName(''); setAdvertIdsInput(''); load()
+    } catch (e: unknown) { flash(e instanceof Error ? e.message : 'Ошибка') }
+    finally { setSaving(false) }
+  }
+
+  async function handleToggle(id: string) {
+    try { await autoSchedulesApi.toggle(id); load() }
+    catch (e: unknown) { flash(e instanceof Error ? e.message : 'Ошибка') }
+  }
+
+  async function handleDelete(id: string) {
+    try { await autoSchedulesApi.delete(id); load() }
+    catch (e: unknown) { flash(e instanceof Error ? e.message : 'Ошибка') }
+  }
+
+  return (
+    <div style={{ marginTop: 24, borderTop: '1px solid #334155', paddingTop: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 15 }}>🔄 Авто-переключение выходные / будни</span>
+          <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+            Бот сам меняет расписание: пятница 22:00 → выходной режим, понедельник 06:00 → будничный
+          </div>
+        </div>
+        <button onClick={() => setShowForm(f => !f)} style={S.btn(showForm, '#a78bfa')}>
+          {showForm ? 'Отмена' : '+ Добавить'}
+        </button>
+      </div>
+
+      {msg && <div style={{ background: '#052e16', color: '#86efac', padding: '8px 12px', borderRadius: 8, marginBottom: 10, fontSize: 13 }}>{msg}</div>}
+
+      {showForm && (
+        <div style={{ ...S.card, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <div>
+              <label style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 4 }}>НАЗВАНИЕ ГРУППЫ</label>
+              <input style={S.input} value={name} onChange={e => setName(e.target.value)} placeholder="Удобрения — авто-расписание" />
+            </div>
+            <div>
+              <label style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 4 }}>ID КАМПАНИЙ (через запятую или пробел)</label>
+              <input style={S.input} value={advertIdsInput} onChange={e => setAdvertIdsInput(e.target.value)} placeholder="123456, 789012, 345678" />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
+            <div>
+              <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 6 }}>📅 БУДНИ (Пн–Пт)</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button onClick={() => setWeekdayPreset('2peaks')} style={S.btn(weekdayPreset === '2peaks', '#38bdf8')}>2 Пика</button>
+                <button onClick={() => setWeekdayPreset('day')}    style={S.btn(weekdayPreset === 'day')}>Дневной</button>
+                <button onClick={() => setWeekdayPreset('24h')}    style={S.btn(weekdayPreset === '24h', '#f59e0b')}>24/7</button>
+              </div>
+              <SchedulePreview hours={weekdayHours} />
+            </div>
+            <div>
+              <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 6 }}>🎉 ВЫХОДНЫЕ (Сб–Вс)</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button onClick={() => setWeekendPreset('weekend')} style={S.btn(weekendPreset === 'weekend', '#a78bfa')}>Выходной</button>
+                <button onClick={() => setWeekendPreset('day')}     style={S.btn(weekendPreset === 'day')}>Дневной</button>
+                <button onClick={() => setWeekendPreset('24h')}     style={S.btn(weekendPreset === '24h', '#f59e0b')}>24/7</button>
+              </div>
+              <SchedulePreview hours={weekendHours} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ color: '#475569', fontSize: 11, flex: 1 }}>
+              Пятница 22:00 UTC = {new Date().toLocaleString('ru', { timeZoneName: 'short' }).split(',')[1]?.includes('UTC') ? '01:00 мск' : '01:00 мск (пятница → суббота)'}
+            </div>
+            <button onClick={handleSave} disabled={saving || !name.trim() || !advertIdsInput.trim()}
+              style={{ background: '#a78bfa', color: '#0f172a', border: 'none', borderRadius: 6, padding: '8px 20px', fontWeight: 700, cursor: 'pointer', fontSize: 13,
+                opacity: saving || !name.trim() || !advertIdsInput.trim() ? 0.5 : 1 }}>
+              {saving ? '⟳ Сохраняю...' : 'Сохранить авто-расписание'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {configs.length === 0 ? (
+        <div style={{ color: '#475569', fontSize: 13 }}>Нет сохранённых авто-расписаний</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {configs.map(c => (
+            <div key={c.id} style={{
+              background: '#1e293b', borderRadius: 8, padding: '10px 14px',
+              border: `1px solid ${c.is_active ? '#334155' : '#1e293b'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: c.is_active ? '#22c55e' : '#64748b', fontSize: 12 }}>
+                    {c.is_active ? '● Активно' : '○ Выключено'}
+                  </span>
+                  <span style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 14 }}>{c.name}</span>
+                </div>
+                <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+                  {c.advert_ids.length} кампаний · Пн-Пт и Сб-Вс разные расписания
+                </div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: '#475569', fontSize: 10, marginBottom: 2 }}>БУДНИ</div>
+                    <SchedulePreview hours={c.weekday_hours} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: '#475569', fontSize: 10, marginBottom: 2 }}>ВЫХОДНЫЕ</div>
+                    <SchedulePreview hours={c.weekend_hours} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button onClick={() => handleToggle(c.id)}
+                  style={{ background: c.is_active ? '#451a03' : '#052e16', color: c.is_active ? '#f59e0b' : '#22c55e',
+                    border: `1px solid ${c.is_active ? '#f59e0b' : '#22c55e'}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}>
+                  {c.is_active ? '⏸ Выкл' : '▶ Вкл'}
+                </button>
+                <button onClick={() => handleDelete(c.id)}
+                  style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #ef4444', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}>
+                  🗑
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Вкладка: Создать по категории ───────────────────────────────────────────
 function CreateTab({ accountId }: { accountId: string }) {
   const [subjects, setSubjects] = useState<ProductSubject[]>([])
@@ -583,7 +745,8 @@ function CreateTab({ accountId }: { accountId: string }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 20, alignItems: 'start' }}>
+    <div>
+    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 20, alignItems: 'start', marginBottom: 8 }}>
       {/* Левая колонка: список категорий */}
       <div>
         <div style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>КАТЕГОРИИ ТОВАРОВ</div>
@@ -769,6 +932,8 @@ function CreateTab({ accountId }: { accountId: string }) {
           </>
         )}
       </div>
+    </div>
+    <AutoSchedulePanel accountId={accountId} />
     </div>
   )
 }

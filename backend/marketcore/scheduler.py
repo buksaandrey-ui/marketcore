@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from marketcore.bidding.executor import evaluate_schedule
 from marketcore.database import AsyncSessionLocal
-from marketcore.models import RuleExecution, Schedule
+from marketcore.models import Account, CampaignAutoSchedule, RuleExecution, Schedule
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +172,58 @@ async def _apply_live(sch: Schedule, payload: dict, result, session) -> object:
     return await apply_to_wb(api_key, payload, result, last_applied_cpm=last_cpm)
 
 
+async def apply_week_schedules(is_weekend: bool) -> None:
+    """Пятница 22:00 UTC → weekend_hours; Понедельник 06:00 UTC → weekday_hours."""
+    label = "выходные" if is_weekend else "будни"
+    logger.info("[week_schedule] Применяю расписание: %s", label)
+
+    async with _session_factory() as session:
+        configs = list(
+            (await session.execute(
+                select(CampaignAutoSchedule).where(CampaignAutoSchedule.is_active == True)  # noqa: E712
+            )).scalars().all()
+        )
+
+        if not configs:
+            logger.info("[week_schedule] нет активных конфигов, пропуск")
+            return
+
+        from marketcore.accounts.encryption import decrypt_api_key
+        from marketcore.ingestor.wb_client import WBClient
+
+        for cfg in configs:
+            try:
+                acc = (await session.execute(
+                    select(Account).where(Account.id == cfg.account_id)
+                )).scalar_one_or_none()
+                if not acc:
+                    logger.warning("[week_schedule] аккаунт %s не найден, пропуск", cfg.account_id)
+                    continue
+
+                advert_key = (
+                    decrypt_api_key(acc.advert_api_key_cipher)
+                    if acc.advert_api_key_cipher
+                    else decrypt_api_key(acc.api_key_cipher)
+                )
+                client = WBClient(advert_key)
+                hours = cfg.weekend_hours if is_weekend else cfg.weekday_hours
+
+                ok = 0
+                for advert_id in (cfg.advert_ids or []):
+                    try:
+                        await client.set_campaign_hours(int(advert_id), hours)
+                        ok += 1
+                    except Exception as exc:
+                        logger.warning("[week_schedule] кампания %s: %s", advert_id, exc)
+
+                logger.info(
+                    "[week_schedule] конфиг «%s» (%s): %d/%d кампаний обновлено",
+                    cfg.name, label, ok, len(cfg.advert_ids or []),
+                )
+            except Exception as exc:
+                logger.exception("[week_schedule] конфиг %s: %s", cfg.id, exc)
+
+
 def start_scheduler() -> None:
     """Запустить APScheduler внутри текущего asyncio event loop."""
     global _scheduler
@@ -186,8 +238,24 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Пятница 22:00 UTC → включить выходное расписание
+    _scheduler.add_job(
+        lambda: apply_week_schedules(True),
+        CronTrigger(day_of_week="fri", hour=22, minute=0),
+        id="weekend_schedule_on",
+        replace_existing=True,
+        max_instances=1,
+    )
+    # Понедельник 06:00 UTC → вернуть будничное расписание
+    _scheduler.add_job(
+        lambda: apply_week_schedules(False),
+        CronTrigger(day_of_week="mon", hour=6, minute=0),
+        id="weekday_schedule_on",
+        replace_existing=True,
+        max_instances=1,
+    )
     _scheduler.start()
-    logger.info("[scheduler] APScheduler запущен (каждые 15 минут)")
+    logger.info("[scheduler] APScheduler запущен (15 мин + авто-переключение выходные/будни)")
 
 
 def stop_scheduler() -> None:

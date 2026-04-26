@@ -15,7 +15,7 @@ from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.accounts import service as acc_service
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import AdStat, Order, SkuPrice, SkuStock, User
+from marketcore.models import AdStat, CampaignAutoSchedule, Order, SkuPrice, SkuStock, User
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -508,3 +508,107 @@ async def create_category_pack(
         "campaigns": created,
         "errors": errors,
     }
+
+
+# ─── Авто-переключение расписания выходные/будни ─────────────────────────────
+
+class AutoScheduleBody(BaseModel):
+    account_id: uuid.UUID
+    name: str
+    advert_ids: list[int]
+    weekday_hours: list[int]   # 24 значения
+    weekend_hours: list[int]   # 24 значения
+
+
+class AutoScheduleOut(BaseModel):
+    id: str
+    name: str
+    advert_ids: list[int]
+    weekday_hours: list[int]
+    weekend_hours: list[int]
+    is_active: bool
+    created_at: str
+
+
+@router.get("/auto-schedules", response_model=list[AutoScheduleOut])
+async def list_auto_schedules(
+    account_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AutoScheduleOut]:
+    rows = list((await db.execute(
+        select(CampaignAutoSchedule)
+        .where(CampaignAutoSchedule.account_id == account_id)
+        .where(CampaignAutoSchedule.user_id == current_user.id)
+        .order_by(CampaignAutoSchedule.created_at.desc())
+    )).scalars().all())
+    return [AutoScheduleOut(
+        id=str(r.id), name=r.name, advert_ids=r.advert_ids or [],
+        weekday_hours=r.weekday_hours, weekend_hours=r.weekend_hours,
+        is_active=r.is_active, created_at=r.created_at.isoformat(),
+    ) for r in rows]
+
+
+@router.post("/auto-schedules", response_model=AutoScheduleOut, status_code=201)
+async def create_auto_schedule(
+    body: AutoScheduleBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AutoScheduleOut:
+    if len(body.weekday_hours) != 24 or len(body.weekend_hours) != 24:
+        raise HTTPException(status_code=400, detail="weekday_hours и weekend_hours должны содержать 24 элемента")
+    row = CampaignAutoSchedule(
+        user_id=current_user.id,
+        account_id=body.account_id,
+        name=body.name,
+        advert_ids=body.advert_ids,
+        weekday_hours=body.weekday_hours,
+        weekend_hours=body.weekend_hours,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return AutoScheduleOut(
+        id=str(row.id), name=row.name, advert_ids=row.advert_ids or [],
+        weekday_hours=row.weekday_hours, weekend_hours=row.weekend_hours,
+        is_active=row.is_active, created_at=row.created_at.isoformat(),
+    )
+
+
+@router.patch("/auto-schedules/{schedule_id}/toggle", response_model=AutoScheduleOut)
+async def toggle_auto_schedule(
+    schedule_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AutoScheduleOut:
+    row = (await db.execute(
+        select(CampaignAutoSchedule)
+        .where(CampaignAutoSchedule.id == schedule_id)
+        .where(CampaignAutoSchedule.user_id == current_user.id)
+    )).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Конфиг не найден")
+    row.is_active = not row.is_active
+    await db.commit()
+    await db.refresh(row)
+    return AutoScheduleOut(
+        id=str(row.id), name=row.name, advert_ids=row.advert_ids or [],
+        weekday_hours=row.weekday_hours, weekend_hours=row.weekend_hours,
+        is_active=row.is_active, created_at=row.created_at.isoformat(),
+    )
+
+
+@router.delete("/auto-schedules/{schedule_id}", status_code=204)
+async def delete_auto_schedule(
+    schedule_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    row = (await db.execute(
+        select(CampaignAutoSchedule)
+        .where(CampaignAutoSchedule.id == schedule_id)
+        .where(CampaignAutoSchedule.user_id == current_user.id)
+    )).scalar_one_or_none()
+    if row:
+        await db.delete(row)
+        await db.commit()

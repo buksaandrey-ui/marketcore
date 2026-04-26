@@ -343,6 +343,36 @@ export const campaignsApi = {
     apiFetch<CategoryPackResult>('/campaigns/create-category-pack', { method: 'POST', body: JSON.stringify(body) }),
 }
 
+export type AutoSchedule = {
+  id: string
+  name: string
+  advert_ids: number[]
+  weekday_hours: number[]
+  weekend_hours: number[]
+  is_active: boolean
+  created_at: string
+}
+
+export const autoSchedulesApi = {
+  list: (accountId: string): Promise<AutoSchedule[]> =>
+    apiFetch<AutoSchedule[]>(`/campaigns/auto-schedules?account_id=${accountId}`),
+
+  create: (body: {
+    account_id: string
+    name: string
+    advert_ids: number[]
+    weekday_hours: number[]
+    weekend_hours: number[]
+  }): Promise<AutoSchedule> =>
+    apiFetch<AutoSchedule>('/campaigns/auto-schedules', { method: 'POST', body: JSON.stringify(body) }),
+
+  toggle: (id: string): Promise<AutoSchedule> =>
+    apiFetch<AutoSchedule>(`/campaigns/auto-schedules/${id}/toggle`, { method: 'PATCH' }),
+
+  delete: (id: string): Promise<null> =>
+    apiFetch<null>(`/campaigns/auto-schedules/${id}`, { method: 'DELETE' }),
+}
+
 /** Запоминает последний выбранный аккаунт между разделами */
 export const accountPrefs = {
   get: (): string => localStorage.getItem('mc_last_account') ?? '',
