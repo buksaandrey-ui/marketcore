@@ -12,6 +12,7 @@ from marketcore.api.routes import (
     bidding_executions,
     campaigns,
     schedules,
+    strategies,
 )
 from marketcore.config import settings
 from marketcore.scheduler import start_scheduler, stop_scheduler
@@ -51,6 +52,7 @@ app.include_router(bidding_executions.router)
 app.include_router(schedules.router)
 app.include_router(benchmarks.router)
 app.include_router(campaigns.router)
+app.include_router(strategies.router)
 
 
 @app.get("/health")

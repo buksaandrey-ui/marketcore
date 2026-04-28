@@ -471,3 +471,111 @@ export const schedulesApi = {
   delete: (id: string): Promise<null> =>
     apiFetch<null>(`/schedules/${id}`, { method: 'DELETE' }),
 }
+
+// ─── Стратегия «2 пика» ───────────────────────────────────────────────────────
+
+export type StrategyConfig = {
+  id: string
+  account_id: string
+  campaign_id: number
+  strategy_type: string
+  category: string
+  cpm_min: number
+  cpm_cap: number
+  drr_threshold_pct: number
+  min_stock: number
+  budget_warning_pct: number
+  budget_stop_pct: number
+  dry_run: boolean
+  use_history: boolean
+  history_min_days: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type WeeklySchedule = {
+  strategy_id: string
+  campaign_id: number
+  category: string
+  source: string
+  schedule: Record<string, string[]>  // day_type → [24 × 'LOW'|'MEDIUM'|'HIGH']
+}
+
+export type BidLogEntry = {
+  id: string
+  campaign_id: number
+  computed_at: string
+  day_type: string
+  hour: number
+  demand_level: string
+  bid_type: string
+  cpm_min: number
+  cpm_target: number
+  cpm_prev: number
+  applied: boolean
+  dry_run: boolean
+  skip_reason: string
+}
+
+export type StrategyRunResult = {
+  campaign_id: number
+  day_type: string
+  hour: number
+  demand_level: string
+  cpm_min: number
+  cpm_target: number
+  cpm_prev: number
+  applied: boolean
+  skip_reason: string | null
+  dry_run: boolean
+}
+
+export type CategoryOption = { key: string; label: string }
+
+export const strategiesApi = {
+  /** Список доступных профилей категорий */
+  categories: (): Promise<{ categories: CategoryOption[] }> =>
+    apiFetch('/strategies/categories'),
+
+  /** Список стратегий аккаунта */
+  list: (accountId: string): Promise<StrategyConfig[]> =>
+    apiFetch<StrategyConfig[]>(`/strategies?account_id=${accountId}`),
+
+  /** Создать или обновить стратегию */
+  createOrUpdate: (body: {
+    account_id: string
+    campaign_id: number
+    category: string
+    cpm_min: number
+    cpm_cap: number
+    drr_threshold_pct: number
+    min_stock: number
+    budget_warning_pct: number
+    budget_stop_pct: number
+    dry_run: boolean
+    use_history: boolean
+    history_min_days: number
+  }): Promise<StrategyConfig> =>
+    apiFetch<StrategyConfig>('/strategies/two-peaks', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** Вкл/выкл стратегию */
+  toggle: (id: string): Promise<StrategyConfig> =>
+    apiFetch<StrategyConfig>(`/strategies/${id}/toggle`, { method: 'PATCH' }),
+
+  /** Удалить стратегию */
+  delete: (id: string): Promise<null> =>
+    apiFetch<null>(`/strategies/${id}`, { method: 'DELETE' }),
+
+  /** Немедленный расчёт (dry-run) */
+  runNow: (id: string): Promise<StrategyRunResult> =>
+    apiFetch<StrategyRunResult>(`/strategies/${id}/run`, { method: 'POST' }),
+
+  /** Расписание на неделю (для тепловой карты) */
+  schedule: (id: string): Promise<WeeklySchedule> =>
+    apiFetch<WeeklySchedule>(`/strategies/${id}/schedule`),
+
+  /** Лог изменений ставок */
+  log: (id: string, limit = 100): Promise<BidLogEntry[]> =>
+    apiFetch<BidLogEntry[]>(`/strategies/${id}/log?limit=${limit}`),
+}

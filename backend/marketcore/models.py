@@ -217,3 +217,53 @@ class SkuName(Base):
     sku: Mapped[str] = mapped_column(String(255), nullable=False, primary_key=True)
     name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CampaignStrategy(Base):
+    """Конфигурация стратегии «2 пика» для рекламной кампании WB."""
+    __tablename__ = "campaign_strategies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+    campaign_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    strategy_type: Mapped[str] = mapped_column(String(50), nullable=False, default="two_peaks")
+    category: Mapped[str] = mapped_column(String(100), nullable=False, default="universal")
+    cpm_min: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    cpm_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=5000)
+    drr_threshold_pct: Mapped[float] = mapped_column(Float, nullable=False, default=15.0)
+    min_stock: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    budget_warning_pct: Mapped[float] = mapped_column(Float, nullable=False, default=80.0)
+    budget_stop_pct: Mapped[float] = mapped_column(Float, nullable=False, default=95.0)
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    use_history: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    history_min_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "campaign_id", name="uq_campaign_strategies_account_campaign"),
+    )
+
+
+class BidChangeLog(Base):
+    """Лог изменений ставок стратегией «2 пика»."""
+    __tablename__ = "bid_change_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+    campaign_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    day_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    hour: Mapped[int] = mapped_column(Integer, nullable=False)
+    demand_level: Mapped[str] = mapped_column(String(10), nullable=False)   # LOW/MEDIUM/HIGH
+    bid_type: Mapped[str] = mapped_column(String(15), nullable=False)        # MINIMAL/COMPETITIVE/LEADER
+    cpm_min: Mapped[int] = mapped_column(Integer, nullable=False)
+    cpm_target: Mapped[int] = mapped_column(Integer, nullable=False)
+    cpm_prev: Mapped[int] = mapped_column(Integer, nullable=False)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    skip_reason: Mapped[str] = mapped_column(String(255), nullable=False, default="")

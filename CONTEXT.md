@@ -64,7 +64,19 @@ backend/marketcore/
 │       ├── bidding.py       — автобот ставок (правила)
 │       ├── bidding_executions.py — история автобота
 │       ├── campaigns.py     — управление РК WB (600+ строк)
-│       └── schedules.py     — сохранённые расписания UI
+│       ├── schedules.py     — сохранённые расписания UI
+│       └── strategies.py    — стратегия «2 пика» (9 эндпоинтов)
+├── strategy/                — модуль стратегии «2 пика»
+│   ├── models.py            — DemandLevel, BidType, DayType, WeeklySchedule и др.
+│   ├── calendar/
+│   │   ├── ru_holidays.py   — производственный календарь РФ
+│   │   └── holidays_config.json
+│   └── two_peaks/
+│       ├── default_profiles.py — профили по категориям (5 штук)
+│       ├── profile_builder.py  — построение профиля из ad_stats
+│       ├── bid_calculator.py   — resolve_bid + apply_safeguards (7 правил)
+│       ├── schedule_builder.py — WeeklySchedule с переходами
+│       └── strategy.py         — TwoPeaksStrategy оркестратор
 ├── ingestor/
 │   ├── db.py                — запись данных в PostgreSQL
 │   ├── wb_client.py         — клиент WB API (статистика, реклама, карточки)
@@ -255,3 +267,12 @@ url = f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/info
 - ✅ Массовое создание кампаний (1 SKU = 1 авто-кампания CPM)
 - ✅ Расписание 7×24: интерактивная сетка с двумя пиками
 - ✅ SKU names: реальные названия из WB Advert API + граммовка/объём из basket CDN
+- ✅ **Стратегия «2 пика»**: полный модуль `backend/marketcore/strategy/`
+  - Профили по категориям (fertilizers_plants, home_household, beauty_care, sports_outdoor, universal)
+  - Российский производственный календарь (holidays_config.json)
+  - Калькулятор ставок + 7 safeguards (бюджет, остатки, ДРР, inactive, delta)
+  - Построение профиля из истории ad_stats (build_profile_from_history)
+  - WeeklySchedule 7×24 с переходами MEDIUM вокруг пиков
+  - Таблицы БД: `campaign_strategies`, `bid_change_log`
+  - API: `/strategies/*` (9 эндпоинтов)
+  - Фронтенд: вкладка «🤖 Стратегия» в WbCampaignManager + тепловая карта

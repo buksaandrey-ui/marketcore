@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  accountsApi, campaignsApi, accountPrefs, autoSchedulesApi,
-  type Account, type CampaignStat, type OverallDrrData, type ProductSubject, type CategoryPackResult, type AutoSchedule,
+  accountsApi, campaignsApi, accountPrefs, autoSchedulesApi, strategiesApi,
+  type Account, type CampaignStat, type WbCampaign, type OverallDrrData, type ProductSubject, type CategoryPackResult, type AutoSchedule,
+  type StrategyConfig, type WeeklySchedule, type BidLogEntry, type StrategyRunResult, type CategoryOption,
 } from '../api'
 
 // ─── Константы ────────────────────────────────────────────────────────────────
@@ -13,7 +14,7 @@ const SCHEDULE_DAY    = [0,0,0,0,0,0,0,80,100,100,100,100,100,100,100,100,100,80
 const SCHEDULE_24H    = Array(24).fill(100)
 const WEEKEND_HOURS   = [0,0,0,0,0,0,80,80,80,80,80,80,100,100,100,100,100,100,100,100,80,80,0,0]
 
-type Tab = 'stats' | 'manage' | 'sku' | 'schedule' | 'create'
+type Tab = 'stats' | 'manage' | 'sku' | 'schedule' | 'create' | 'strategy'
 type SortKey = keyof CampaignStat
 
 // ─── Цветовые токены ──────────────────────────────────────────────────────────
@@ -66,7 +67,7 @@ const card: React.CSSProperties = {
   boxShadow: C.shadow,
 }
 
-function btn(active: boolean, variant: 'primary' | 'default' | 'danger' | 'success' = 'default'): React.CSSProperties {
+function btn(active: boolean, variant: 'primary' | 'default' | 'danger' | 'success' | 'neutral' = 'default'): React.CSSProperties {
   if (active && variant === 'primary') return {
     background: C.primary, color: '#fff', border: `1px solid ${C.primary}`,
     borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -183,6 +184,7 @@ export function WbCampaignManager() {
     { id: 'manage',   label: 'Управление'           },
     { id: 'sku',      label: '🚀 Массовое создание' },
     { id: 'schedule', label: '📅 Расписание'        },
+    { id: 'strategy', label: '🤖 Стратегия «2 пика»'},
     { id: 'create',   label: 'По категории'         },
   ]
 
@@ -243,6 +245,7 @@ export function WbCampaignManager() {
         {accountId && tab === 'manage'   && <ManageTab   accountId={accountId} />}
         {accountId && tab === 'sku'      && <SkuCreateTab accountId={accountId} />}
         {accountId && tab === 'schedule' && <ScheduleTab  accountId={accountId} />}
+        {accountId && tab === 'strategy' && <StrategyTab  accountId={accountId} />}
         {accountId && tab === 'create'   && <CreateTab    accountId={accountId} />}
       </div>
     </div>
@@ -1961,6 +1964,507 @@ function ScheduleTab({ accountId }: { accountId: string }) {
           WB API принимает единый 24-часовой шаблон.
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Стратегия «2 пика» ───────────────────────────────────────────────────────
+
+const DEMAND_COLOR: Record<string, string> = {
+  HIGH:   '#6366f1',
+  MEDIUM: '#f59e0b',
+  LOW:    '#e2e8f0',
+}
+const DEMAND_LABEL: Record<string, string> = {
+  HIGH:   'Пик',
+  MEDIUM: 'Средний',
+  LOW:    'Тихо',
+}
+const DAY_LABEL: Record<string, string> = {
+  workday:         'Пн–Чт',
+  friday:          'Пятница',
+  saturday:        'Суббота',
+  sunday:          'Воскресенье',
+  holiday:         'Праздник',
+  pre_holiday:     'Предпраздн.',
+  transferred_off: 'Перен. выходной',
+}
+const DAY_ORDER = ['workday','friday','saturday','sunday','holiday','pre_holiday','transferred_off']
+
+function StrategyTab({ accountId }: { accountId: string }) {
+  const [campaigns, setCampaigns] = useState<WbCampaign[]>([])
+  const [strategies, setStrategies] = useState<StrategyConfig[]>([])
+  const [categories, setCategories] = useState<CategoryOption[]>([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  // Форма создания
+  const [formCampaignId, setFormCampaignId] = useState<string>('')
+  const [formCategory, setFormCategory] = useState('universal')
+  const [formCpmMin, setFormCpmMin] = useState(100)
+  const [formCpmCap, setFormCpmCap] = useState(5000)
+  const [formDrr, setFormDrr] = useState(15)
+  const [formMinStock, setFormMinStock] = useState(5)
+  const [formDryRun, setFormDryRun] = useState(true)
+  const [formSaving, setFormSaving] = useState(false)
+
+  // Просмотр расписания
+  const [viewStrategyId, setViewStrategyId] = useState<string | null>(null)
+  const [weeklySchedule, setWeeklySchedule] = useState<WeeklySchedule | null>(null)
+  const [scheduleLoading, setScheduleLoading] = useState(false)
+
+  // Лог
+  const [logStrategyId, setLogStrategyId] = useState<string | null>(null)
+  const [logEntries, setLogEntries] = useState<BidLogEntry[]>([])
+  const [logLoading, setLogLoading] = useState(false)
+
+  // Тест-ран
+  const [runResult, setRunResult] = useState<StrategyRunResult | null>(null)
+  const [running, setRunning] = useState<string | null>(null)
+
+  const flash = (text: string, ok = true) => {
+    setMsg({ text, ok })
+    setTimeout(() => setMsg(null), 4000)
+  }
+
+  useEffect(() => {
+    if (!accountId) return
+    setLoading(true)
+    Promise.all([
+      campaignsApi.list(accountId),
+      strategiesApi.list(accountId),
+      strategiesApi.categories(),
+    ]).then(([camps, strats, cats]) => {
+      setCampaigns(camps)
+      setStrategies(strats)
+      setCategories(cats.categories)
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [accountId])
+
+  const handleSave = async () => {
+    if (!formCampaignId) { flash('Выберите кампанию', false); return }
+    setFormSaving(true)
+    try {
+      const s = await strategiesApi.createOrUpdate({
+        account_id: accountId,
+        campaign_id: Number(formCampaignId),
+        category: formCategory,
+        cpm_min: formCpmMin,
+        cpm_cap: formCpmCap,
+        drr_threshold_pct: formDrr,
+        min_stock: formMinStock,
+        budget_warning_pct: 80,
+        budget_stop_pct: 95,
+        dry_run: formDryRun,
+        use_history: true,
+        history_min_days: 14,
+      })
+      setStrategies(prev => {
+        const idx = prev.findIndex(x => x.id === s.id)
+        return idx >= 0 ? prev.map((x, i) => i === idx ? s : x) : [s, ...prev]
+      })
+      flash('✅ Стратегия сохранена')
+    } catch (e: any) {
+      flash('Ошибка: ' + (e.message ?? 'неизвестная'), false)
+    } finally {
+      setFormSaving(false)
+    }
+  }
+
+  const handleToggle = async (id: string) => {
+    try {
+      const s = await strategiesApi.toggle(id)
+      setStrategies(prev => prev.map(x => x.id === id ? s : x))
+    } catch { flash('Не удалось переключить', false) }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Удалить стратегию?')) return
+    await strategiesApi.delete(id)
+    setStrategies(prev => prev.filter(x => x.id !== id))
+    flash('Удалено')
+  }
+
+  const handleRunNow = async (id: string) => {
+    setRunning(id)
+    setRunResult(null)
+    try {
+      const r = await strategiesApi.runNow(id)
+      setRunResult(r)
+    } catch (e: any) {
+      flash('Ошибка расчёта: ' + (e.message ?? ''), false)
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  const handleViewSchedule = async (id: string) => {
+    if (viewStrategyId === id) { setViewStrategyId(null); setWeeklySchedule(null); return }
+    setViewStrategyId(id)
+    setScheduleLoading(true)
+    try {
+      const s = await strategiesApi.schedule(id)
+      setWeeklySchedule(s)
+    } catch { flash('Не удалось загрузить расписание', false) }
+    finally { setScheduleLoading(false) }
+  }
+
+  const handleViewLog = async (id: string) => {
+    if (logStrategyId === id) { setLogStrategyId(null); setLogEntries([]); return }
+    setLogStrategyId(id)
+    setLogLoading(true)
+    try {
+      const entries = await strategiesApi.log(id, 50)
+      setLogEntries(entries)
+    } catch { flash('Не удалось загрузить лог', false) }
+    finally { setLogLoading(false) }
+  }
+
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Загрузка…</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Flash-сообщение */}
+      {msg && (
+        <div style={{
+          padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+          background: msg.ok ? '#d1fae5' : '#fee2e2',
+          color: msg.ok ? '#065f46' : '#991b1b',
+        }}>{msg.text}</div>
+      )}
+
+      {/* ── Пояснение ── */}
+      <div style={{ ...card, padding: 20, background: '#eef2ff', borderColor: '#c7d2fe' }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: C.primary, marginBottom: 8 }}>
+          🤖 Стратегия «2 пика» — что это?
+        </div>
+        <div style={{ fontSize: 13, color: '#3730a3', lineHeight: 1.7 }}>
+          Система автоматически меняет ставку CPM каждый час в зависимости от спроса:<br/>
+          <b>🔵 Пик (HIGH)</b> — ставка лидера (cpm_min × 5.5) — в часы максимального трафика<br/>
+          <b>🟡 Средний (MEDIUM)</b> — конкурентная ставка (cpm_min × 3.5) — переходные часы<br/>
+          <b>⚪ Тихо (LOW)</b> — минимальная ставка (cpm_min × 1) — ночь, провалы спроса<br/>
+          До 2 пиков в сутки. Защита: бюджет, остатки, ДРР.
+        </div>
+      </div>
+
+      {/* ── Форма создания стратегии ── */}
+      <div style={{ ...card, padding: 24 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 18 }}>
+          Настроить стратегию для кампании
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Кампания</label>
+            <select
+              value={formCampaignId}
+              onChange={e => setFormCampaignId(e.target.value)}
+              style={{ ...inputStyle }}
+            >
+              <option value="">— выберите —</option>
+              {campaigns.map(c => (
+                <option key={c.advert_id} value={c.advert_id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Категория профиля</label>
+            <select value={formCategory} onChange={e => setFormCategory(e.target.value)} style={{ ...inputStyle }}>
+              {categories.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>CPM мин рынка, ₽</label>
+            <input type="number" value={formCpmMin} onChange={e => setFormCpmMin(Number(e.target.value))} style={{ ...inputStyle }} />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Потолок ставки, ₽</label>
+            <input type="number" value={formCpmCap} onChange={e => setFormCpmCap(Number(e.target.value))} style={{ ...inputStyle }} />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Порог ДРР, %</label>
+            <input type="number" value={formDrr} onChange={e => setFormDrr(Number(e.target.value))} style={{ ...inputStyle }} />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Мин. остаток, шт</label>
+            <input type="number" value={formMinStock} onChange={e => setFormMinStock(Number(e.target.value))} style={{ ...inputStyle }} />
+          </div>
+
+        </div>
+
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.text, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={formDryRun}
+              onChange={e => setFormDryRun(e.target.checked)}
+              style={{ width: 16, height: 16 }}
+            />
+            Тестовый режим (dry-run) — считать но не применять
+          </label>
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <button
+            onClick={handleSave}
+            disabled={formSaving}
+            style={{ ...btn(true, 'primary'), padding: '10px 28px', fontSize: 13 }}
+          >
+            {formSaving ? '⏳ Сохраняем…' : '💾 Сохранить стратегию'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Список стратегий ── */}
+      {strategies.length > 0 && (
+        <div style={{ ...card, padding: 24 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 16 }}>
+            Активные стратегии ({strategies.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {strategies.map(s => {
+              const camp = campaigns.find(c => c.advert_id === s.campaign_id)
+              const campName = camp?.name ?? `#${s.campaign_id}`
+              const isViewOpen = viewStrategyId === s.id
+              const isLogOpen = logStrategyId === s.id
+              const isRunning = running === s.id
+
+              return (
+                <div key={s.id} style={{
+                  border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden',
+                }}>
+                  {/* Шапка стратегии */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px',
+                    background: s.enabled ? C.surface : '#f8fafc',
+                  }}>
+                    <div style={{
+                      width: 10, height: 10, borderRadius: '50%',
+                      background: s.enabled ? (s.dry_run ? '#f59e0b' : '#10b981') : '#94a3b8',
+                      flexShrink: 0,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {campName}
+                      </div>
+                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
+                        {_categoryLabel(s.category, categories)} • cap {s.cpm_cap}₽ • ДРР ≤{s.drr_threshold_pct}%
+                        {s.dry_run && <span style={{ color: '#d97706', marginLeft: 6 }}>🟡 dry-run</span>}
+                        {!s.dry_run && s.enabled && <span style={{ color: '#059669', marginLeft: 6 }}>🟢 live</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button
+                        onClick={() => handleViewSchedule(s.id)}
+                        style={{ ...btn(true, 'neutral'), padding: '6px 12px', fontSize: 12 }}
+                      >
+                        {isViewOpen ? 'Скрыть' : '🗓 График'}
+                      </button>
+                      <button
+                        onClick={() => handleRunNow(s.id)}
+                        disabled={isRunning}
+                        style={{ ...btn(true, 'neutral'), padding: '6px 12px', fontSize: 12 }}
+                      >
+                        {isRunning ? '⏳' : '▶ Тест'}
+                      </button>
+                      <button
+                        onClick={() => handleViewLog(s.id)}
+                        style={{ ...btn(true, 'neutral'), padding: '6px 12px', fontSize: 12 }}
+                      >
+                        {isLogOpen ? 'Скрыть лог' : '📋 Лог'}
+                      </button>
+                      <button
+                        onClick={() => handleToggle(s.id)}
+                        style={{
+                          ...btn(true, s.enabled ? 'danger' : 'primary'),
+                          padding: '6px 12px', fontSize: 12,
+                        }}
+                      >
+                        {s.enabled ? 'Выкл' : 'Вкл'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(s.id)}
+                        style={{ ...btn(true, 'danger'), padding: '6px 12px', fontSize: 12 }}
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Результат теста */}
+                  {running === null && runResult && logStrategyId !== s.id && viewStrategyId !== s.id && (
+                    <div style={{ padding: '10px 18px', background: '#f0fdf4', borderTop: `1px solid ${C.border}`, fontSize: 12 }}>
+                      ▶ Последний тест: спрос <b>{runResult.demand_level}</b> → ставка <b>{runResult.cpm_target}₽</b>
+                      {runResult.skip_reason && <span style={{ color: '#92400e', marginLeft: 8 }}>({runResult.skip_reason})</span>}
+                    </div>
+                  )}
+
+                  {/* Тепловая карта расписания */}
+                  {isViewOpen && (
+                    <div style={{ padding: '16px 18px', borderTop: `1px solid ${C.border}`, background: '#fafafa' }}>
+                      {scheduleLoading ? (
+                        <div style={{ color: C.textMuted, fontSize: 13 }}>Загрузка расписания…</div>
+                      ) : weeklySchedule ? (
+                        <ScheduleHeatmap schedule={weeklySchedule} />
+                      ) : null}
+                    </div>
+                  )}
+
+                  {/* Лог изменений */}
+                  {isLogOpen && (
+                    <div style={{ padding: '16px 18px', borderTop: `1px solid ${C.border}`, background: '#fafafa' }}>
+                      {logLoading ? (
+                        <div style={{ color: C.textMuted, fontSize: 13 }}>Загрузка лога…</div>
+                      ) : logEntries.length === 0 ? (
+                        <div style={{ color: C.textMuted, fontSize: 13 }}>Лог пуст — стратегия ещё не запускалась</div>
+                      ) : (
+                        <BidLogTable entries={logEntries} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {strategies.length === 0 && !loading && (
+        <div style={{ ...card, padding: 32, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+          Стратегий пока нет — настройте первую выше
+        </div>
+      )}
+    </div>
+  )
+}
+
+function _categoryLabel(key: string, categories: CategoryOption[]): string {
+  return categories.find(c => c.key === key)?.label ?? key
+}
+
+// ─── Тепловая карта расписания ────────────────────────────────────────────────
+
+function ScheduleHeatmap({ schedule }: { schedule: WeeklySchedule }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+
+  return (
+    <div>
+      <div style={{ fontWeight: 600, fontSize: 13, color: C.text, marginBottom: 10 }}>
+        Расписание ставок: {schedule.category}
+        <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8, fontWeight: 400 }}>
+          (источник: {schedule.source === 'history' ? '📊 из истории кликов' : '📋 дефолтный профиль'})
+        </span>
+      </div>
+
+      {/* Легенда */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+        {(['HIGH','MEDIUM','LOW'] as const).map(d => (
+          <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <div style={{ width: 14, height: 14, borderRadius: 3, background: DEMAND_COLOR[d] }} />
+            <span style={{ color: C.text }}>{DEMAND_LABEL[d]}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Сетка */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 720 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 110, textAlign: 'left', fontSize: 11, color: C.textMuted, padding: '4px 8px', fontWeight: 500 }}>
+                День / Час
+              </th>
+              {hours.map(h => (
+                <th key={h} style={{ fontSize: 10, color: C.textMuted, padding: '4px 2px', textAlign: 'center', fontWeight: 400, minWidth: 26 }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {DAY_ORDER.map(dayType => {
+              const row = schedule.schedule[dayType]
+              if (!row) return null
+              return (
+                <tr key={dayType}>
+                  <td style={{ fontSize: 11, color: C.text, padding: '3px 8px', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    {DAY_LABEL[dayType] ?? dayType}
+                  </td>
+                  {row.map((level, h) => (
+                    <td
+                      key={h}
+                      title={`${DAY_LABEL[dayType]} ${h}:00 — ${DEMAND_LABEL[level] ?? level}`}
+                      style={{
+                        background: DEMAND_COLOR[level] ?? '#e2e8f0',
+                        width: 26, height: 26, borderRadius: 3, border: '2px solid #fff',
+                        cursor: 'default',
+                      }}
+                    />
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── Таблица лога ────────────────────────────────────────────────────────────
+
+function BidLogTable({ entries }: { entries: BidLogEntry[] }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: C.surfaceHover }}>
+            {['Время','День','Час','Спрос','Тип ставки','CPM мин','Цель','Было','Применено','Причина'].map(h => (
+              <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: C.textSec, fontWeight: 600, whiteSpace: 'nowrap', borderBottom: `1px solid ${C.border}` }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(e => (
+            <tr key={e.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <td style={{ padding: '7px 10px', color: C.textMuted, whiteSpace: 'nowrap' }}>
+                {new Date(e.computed_at).toLocaleString('ru-RU', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })}
+              </td>
+              <td style={{ padding: '7px 10px' }}>{DAY_LABEL[e.day_type] ?? e.day_type}</td>
+              <td style={{ padding: '7px 10px' }}>{e.hour}:00</td>
+              <td style={{ padding: '7px 10px' }}>
+                <span style={{
+                  background: DEMAND_COLOR[e.demand_level] ?? '#e2e8f0',
+                  color: e.demand_level === 'HIGH' ? '#fff' : '#1e293b',
+                  padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                }}>
+                  {DEMAND_LABEL[e.demand_level] ?? e.demand_level}
+                </span>
+              </td>
+              <td style={{ padding: '7px 10px', color: C.textSec }}>{e.bid_type}</td>
+              <td style={{ padding: '7px 10px' }}>{e.cpm_min}₽</td>
+              <td style={{ padding: '7px 10px', fontWeight: 600, color: C.primary }}>{e.cpm_target}₽</td>
+              <td style={{ padding: '7px 10px', color: C.textMuted }}>{e.cpm_prev}₽</td>
+              <td style={{ padding: '7px 10px' }}>
+                {e.applied
+                  ? <span style={{ color: '#10b981', fontWeight: 600 }}>✅</span>
+                  : <span style={{ color: '#94a3b8' }}>—</span>
+                }
+              </td>
+              <td style={{ padding: '7px 10px', color: C.textMuted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {e.skip_reason || '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
