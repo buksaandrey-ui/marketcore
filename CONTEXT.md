@@ -15,7 +15,7 @@
 | БД | PostgreSQL (TimescaleDB) в Docker, порт 5432 |
 | Кэш | Redis в Docker, порт 6379 |
 | Деплой фронт | Vercel → `https://marketcore-nu.vercel.app` |
-| Деплой бэкенд | Railway (настраивается) |
+| Деплой бэкенд | Railway → `https://marketcore-production-3718.up.railway.app` ✅ |
 | Репозиторий | `https://github.com/buksaandrey-ui/marketcore.git` |
 
 ---
