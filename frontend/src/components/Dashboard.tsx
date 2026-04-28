@@ -3,7 +3,7 @@ import {
   SKUS, totalSpend,
   type SkuItem, type PromoSpend,
 } from '../data/demo'
-import { analyticsApi, type DashboardSummary } from '../api'
+import { analyticsApi, type DashboardSummary, type PayoutsData } from '../api'
 import './Dashboard.css'
 
 type Period = 'today' | 'yesterday' | '7d' | 'month' | 'custom'
@@ -95,6 +95,8 @@ export function Dashboard() {
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [sortAsc, setSortAsc] = useState(false)
   const [realData, setRealData] = useState<DashboardSummary | null>(null)
+  const [payouts, setPayouts] = useState<PayoutsData | null>(null)
+  const [payoutsLoading, setPayoutsLoading] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const [period, setPeriod] = useState<Period>('month')
@@ -106,6 +108,10 @@ export function Dashboard() {
     const params: { period: string; date_from?: string; date_to?: string } = { period: p }
     if (p === 'custom' && from && to) { params.date_from = from; params.date_to = to }
     analyticsApi.dashboard(params).then(setRealData).catch(() => {}).finally(() => setLoading(false))
+    // Начисления грузим параллельно — медленный запрос к WB API
+    setPayouts(null)
+    setPayoutsLoading(true)
+    analyticsApi.payouts(params).then(setPayouts).catch(() => setPayouts(null)).finally(() => setPayoutsLoading(false))
   }
 
   useEffect(() => { loadData('month') }, [])
@@ -120,7 +126,6 @@ export function Dashboard() {
   }
 
   const ordersCount = realData?.has_data ? realData.orders_count ?? 0 : totalOrders
-  const ordersSum   = realData?.has_data ? realData.orders_sum   ?? 0 : totalOrdersSum
   const revenue     = realData?.has_data ? realData.revenue      ?? 0 : totalRevenue
   const drrO        = realData?.has_data ? realData.drr_to_orders ?? 0 : globalDrrO
   const drrR        = realData?.has_data ? realData.drr_to_revenue ?? 0 : globalDrrR
@@ -194,15 +199,30 @@ export function Dashboard() {
         <div className="kpi-card">
           <div className="kpi-top"><span className="kpi-icon">📦</span><span className="kpi-label">Заказы</span></div>
           <div className="kpi-value">{fmt(ordersCount)} <span className="kpi-unit">шт</span></div>
-          <div className="kpi-sub">Сумма: ₽ {fmt(ordersSum)}</div>
+          <div className="kpi-sub" title="Количество оформленных заказов за период">всего оформлено</div>
           {isDemo && <div className="kpi-delta pos">▲ 12.4% vs вчера</div>}
         </div>
         <div className="kpi-card">
-          <div className="kpi-top"><span className="kpi-icon">💰</span><span className="kpi-label">Выручка</span></div>
+          <div className="kpi-top"><span className="kpi-icon">💳</span><span className="kpi-label">Оплатили покупатели</span></div>
           <div className="kpi-value">₽ {fmt(revenue)}</div>
-          <div className="kpi-sub">Сумма заказов − СПП</div>
+          <div className="kpi-sub" title="finishedPrice × количество = цена после скидки продавца + скидка СПП. Именно эту сумму заплатили покупатели.">
+            finishedPrice · с учётом СПП ℹ
+          </div>
           {isDemo && <div className="kpi-delta pos">▲ 8.1% vs вчера</div>}
         </div>
+        {!isDemo && (
+          <div className="kpi-card" title="ppvz_for_pay из WB финансового отчёта = Выручка − комиссия WB − логистика − хранение. Это реальная сумма к перечислению от WB.">
+            <div className="kpi-top"><span className="kpi-icon">🏦</span><span className="kpi-label">Начислено WB</span></div>
+            {payoutsLoading ? (
+              <div className="kpi-value" style={{ fontSize: 14, color: '#9ca3af' }}>загрузка…</div>
+            ) : payouts?.has_data ? (
+              <div className="kpi-value">₽ {fmt(payouts.payout_sum)}</div>
+            ) : (
+              <div className="kpi-value" style={{ fontSize: 14, color: '#9ca3af' }}>нет данных</div>
+            )}
+            <div className="kpi-sub">ppvz_for_pay · после всех вычетов WB ℹ</div>
+          </div>
+        )}
         {isDemo && (
           <div className="kpi-card">
             <div className="kpi-top"><span className="kpi-icon">👆</span><span className="kpi-label">CTR средний</span></div>

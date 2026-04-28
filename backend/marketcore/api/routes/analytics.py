@@ -307,6 +307,54 @@ async def sales_report(
     }
 
 
+@router.get("/payouts")
+async def get_payouts(
+    period: str = Query("month"),
+    date_from_str: str | None = Query(None, alias="date_from"),
+    date_to_str: str | None = Query(None, alias="date_to"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Сумма начислений от WB за период (ppvz_for_pay из финансового отчёта).
+
+    Это реальные деньги которые WB перечислит продавцу:
+    ppvz_for_pay = Выручка − комиссия WB − логистика − хранение.
+    Данные берутся напрямую из WB Statistics API (не из нашей БД).
+    """
+    from marketcore.accounts.encryption import decrypt_api_key
+    from marketcore.ingestor.wb_client import WBClient
+
+    accounts_result = await db.execute(
+        select(Account).where(Account.user_id == current_user.id, Account.status == "active")
+    )
+    accounts = list(accounts_result.scalars().all())
+    wb_accounts = [a for a in accounts if a.marketplace == "wb"]
+    if not wb_accounts:
+        return {"has_data": False, "payout_sum": 0.0}
+
+    df, dt = _period_range(period, date_from_str, date_to_str)
+    date_from = df.strftime("%Y-%m-%d")
+    date_to   = dt.strftime("%Y-%m-%d")
+
+    total = 0.0
+    for account in wb_accounts:
+        try:
+            api_key = decrypt_api_key(account.api_key_cipher)
+            client = WBClient(api_key)
+            payout = await client.get_payouts_sum(date_from, date_to)
+            total += payout
+        except Exception:
+            pass
+
+    return {
+        "has_data": total != 0.0,
+        "payout_sum": total,
+        "period_from": date_from,
+        "period_to": date_to,
+        "note": "ppvz_for_pay из WB финансового отчёта = выручка − комиссия − логистика − хранение",
+    }
+
+
 @router.get("/supply-forecast")
 async def get_supply_forecast(
     db: AsyncSession = Depends(get_db),

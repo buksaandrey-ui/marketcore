@@ -155,15 +155,25 @@ class WBClient:
         GET /adv/v1/promotion/count → возвращает ID кампаний сгруппированные по типу/статусу.
         WB убрал endpoint для получения деталей, поэтому показываем ID как имя кампании.
         """
+        import asyncio as _asyncio
+
         if statuses is None:
             statuses = [9, 11]  # 9=активна, 11=на паузе
 
+        # Retry при 429 (WB rate limit: ~6 req/min на advert API)
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(
-                f"{WB_ADV_BASE}/adv/v1/promotion/count",
-                headers=self._headers,
-            )
-            resp.raise_for_status()
+            for attempt in range(3):
+                resp = await client.get(
+                    f"{WB_ADV_BASE}/adv/v1/promotion/count",
+                    headers=self._headers,
+                )
+                if resp.status_code == 429:
+                    await _asyncio.sleep(12 * (attempt + 1))  # 12s, 24s, 36s
+                    continue
+                resp.raise_for_status()
+                break
+            else:
+                resp.raise_for_status()
             count_data = resp.json()
 
         all_adverts = count_data.get("adverts") or []
@@ -697,6 +707,38 @@ class WBClient:
                     continue
 
         return result
+
+    async def get_payouts_sum(self, date_from: str, date_to: str) -> float:
+        """Сумма начислений продавцу от WB за период (поле ppvz_for_pay).
+
+        Использует WB финансовый отчёт (/api/v5/supplier/reportdetailbyperiod).
+        ppvz_for_pay = выручка − комиссия WB − логистика − хранение.
+        Это реальная сумма которую WB перечислит продавцу.
+        Отрицательные значения (возвраты) уже учтены в поле.
+        """
+        total = 0.0
+        rrdid = 0
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            while True:
+                try:
+                    resp = await client.get(
+                        f"{WB_STAT_BASE}/api/v5/supplier/reportdetailbyperiod",
+                        headers=self._headers,
+                        params={"dateFrom": date_from, "dateTo": date_to, "rrdid": rrdid, "limit": 100000},
+                    )
+                    if resp.status_code != 200:
+                        break
+                    rows: list[dict] = resp.json() or []
+                    if not rows:
+                        break
+                except Exception:
+                    break
+                for row in rows:
+                    total += float(row.get("ppvz_for_pay") or 0)
+                if len(rows) < 100000:
+                    break
+                rrdid = rows[-1].get("rrd_id", 0)
+        return round(total, 2)
 
     async def get_wb_services_costs(self, date_from: str, date_to: str) -> dict:
         """Получить доп. расходы по WB-услугам из финансового отчёта.

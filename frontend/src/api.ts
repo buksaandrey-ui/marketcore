@@ -234,12 +234,27 @@ export type SalesReport = {
   by_sku?: { sku: string; units: number; orders_sum: number }[]
 }
 
+export type PayoutsData = {
+  has_data: boolean
+  payout_sum: number
+  period_from: string
+  period_to: string
+  note: string
+}
+
 export const analyticsApi = {
   dashboard: (params: { period: string; date_from?: string; date_to?: string } = { period: 'month' }): Promise<DashboardSummary> => {
     const q = new URLSearchParams({ period: params.period })
     if (params.date_from) q.set('date_from', params.date_from)
     if (params.date_to) q.set('date_to', params.date_to)
     return apiFetch<DashboardSummary>(`/analytics/dashboard?${q}`)
+  },
+
+  payouts: (params: { period: string; date_from?: string; date_to?: string } = { period: 'month' }): Promise<PayoutsData> => {
+    const q = new URLSearchParams({ period: params.period })
+    if (params.date_from) q.set('date_from', params.date_from)
+    if (params.date_to) q.set('date_to', params.date_to)
+    return apiFetch<PayoutsData>(`/analytics/payouts?${q}`)
   },
 
   supplyForecast: (): Promise<SupplyForecastData> =>
