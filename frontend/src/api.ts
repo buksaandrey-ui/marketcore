@@ -418,6 +418,7 @@ export type CampaignStat = {
   advert_id: number
   name: string
   status: number | null
+  type: number | null           // тип: 4=Каталог, 5=Карточка, 6=Поиск, 8=Авто, 9=Поиск+Кат.
   cpm_min: number | null        // рынок: минимальная ставка
   cpm_competitive: number | null // рынок: конкурентная ставка
   cpm_top10: number | null      // рынок: ставка для топ-10

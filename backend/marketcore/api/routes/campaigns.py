@@ -177,6 +177,7 @@ class CampaignStatOut(BaseModel):
     advert_id: int
     name: str
     status: int | None = None
+    type: int | None = None            # тип: 4=Каталог, 5=Карточка, 6=Поиск, 8=Авто, 9=Поиск+Кат.
     cpm_min: int | None = None         # рынок: минимальная ставка
     cpm_competitive: int | None = None # рынок: конкурентная ставка (~3.5× от мин)
     cpm_top10: int | None = None       # рынок: ставка для топ-10 (~5.5× от мин)
@@ -212,6 +213,7 @@ async def get_campaign_stats(
 
     advert_ids = [c["advert_id"] for c in campaigns]
     status_map = {c["advert_id"]: c.get("status") for c in campaigns}
+    type_map   = {c["advert_id"]: c.get("type")   for c in campaigns}
     # Имена из list_campaigns (уже обогащены через get_campaign_names)
     name_map   = {c["advert_id"]: c["name"] for c in campaigns}
 
@@ -242,6 +244,7 @@ async def get_campaign_stats(
             # Приоритет: реальное имя кампании → имя из статистики (первый товар) → fallback
             name=name_map.get(s["advert_id"]) or s["name"],
             status=status_map.get(s["advert_id"]),
+            type=type_map.get(s["advert_id"]),
             cpm_min=cpm_min,
             cpm_competitive=cpm_competitive,
             cpm_top10=cpm_top10,
@@ -263,6 +266,7 @@ async def get_campaign_stats(
                 advert_id=c["advert_id"],
                 name=c["name"],
                 status=c.get("status"),
+                type=c.get("type"),
                 cpm_min=cpm_min,
                 cpm_competitive=cpm_competitive,
                 cpm_top10=cpm_top10,
