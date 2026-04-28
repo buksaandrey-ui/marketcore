@@ -1,56 +1,17 @@
-import { useState, useMemo } from 'react'
-import { SKUS, SEASONAL_COEFF } from '../data/demo'
+import { useState, useEffect } from 'react'
+import { analyticsApi, type SupplyForecastData } from '../api'
+import { SEASONAL_COEFF } from '../data/demo'
 import './SupplyForecast.css'
 
-// ─── Симуляция исторических продаж ───────────────────────────────────────────
-// Детерминированная псевдо-рандомизация (без Math.random() — стабильные данные)
-
-function fakeDailySales(skuId: string, dailyAvg: number, daysBack: number): number[] {
-  return Array.from({ length: daysBack }, (_, i) => {
-    const seed = (skuId.charCodeAt(i % skuId.length) * (i + 1)) % 17
-    const noise = 0.7 + (seed / 17) * 0.6  // 0.7 – 1.3
-    return Math.max(0, Math.round(dailyAvg * noise))
-  })
-}
-
-function velocity(sales: number[], days: number): number {
-  const slice = sales.slice(0, days)
-  return slice.reduce((s, v) => s + v, 0) / days
-}
-
-// ─── Расчёт прогноза ─────────────────────────────────────────────────────────
-
-const currentMonth = new Date().getMonth() + 1  // 1-12
-
-function calcForecast(sku: typeof SKUS[0], leadDays: number, safetyDays: number) {
-  const dailyAvg30 = sku.orders / 30
-  const history    = fakeDailySales(sku.id, dailyAvg30, 30)
-
-  const vel7   = velocity(history, 7)
-  const vel14  = velocity(history, 14)
-  const vel30  = velocity(history, 30)
-
-  const seasonCoeff    = SEASONAL_COEFF[currentMonth] ?? 1.0
-  const nextMonthCoeff = SEASONAL_COEFF[(currentMonth % 12) + 1] ?? 1.0
-  const adjVel         = vel30 * seasonCoeff      // скорость с сезонной поправкой
-
-  const daysUntilOOS   = adjVel > 0 ? Math.floor(sku.stock / adjVel) : 999
-  const neededQty      = Math.max(0, Math.ceil(adjVel * (leadDays + safetyDays) - sku.stock))
-  const neededQtyNext  = Math.ceil(adjVel * nextMonthCoeff * safetyDays)
-
-  let status: 'critical' | 'soon' | 'ok' | 'overstock'
-  if (sku.stock === 0)         status = 'critical'
-  else if (daysUntilOOS <= leadDays) status = 'critical'
-  else if (daysUntilOOS <= leadDays + safetyDays) status = 'soon'
-  else if (sku.stock > adjVel * 90) status = 'overstock'
-  else status = 'ok'
-
-  return { vel7, vel14, vel30, adjVel, seasonCoeff, daysUntilOOS, neededQty, neededQtyNext, status }
-}
-
-// ─── Сезонный календарь ───────────────────────────────────────────────────────
-
+const currentMonth = new Date().getMonth() + 1
 const MONTH_NAMES = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек']
+
+const STATUS_LABEL: Record<string, string> = {
+  critical:  '🔴 Срочно',
+  soon:      '🟡 Скоро',
+  ok:        '🟢 Норма',
+  overstock: '🔵 Избыток',
+}
 
 function SeasonCalendar() {
   return (
@@ -82,47 +43,66 @@ function SeasonCalendar() {
   )
 }
 
-// ─── Основной компонент ───────────────────────────────────────────────────────
-
-const STATUS_LABEL: Record<string, string> = {
-  critical:  '🔴 Срочно',
-  soon:      '🟡 Скоро',
-  ok:        '🟢 Норма',
-  overstock: '🔵 Избыток',
-}
-
 export function SupplyForecast() {
-  const [leadDays,   setLeadDays]   = useState(14)
-  const [safetyDays, setSafetyDays] = useState(21)
+  const [data, setData]    = useState<SupplyForecastData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]  = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [search, setSearch] = useState('')
 
-  const rows = useMemo(() =>
-    SKUS.map(sku => ({ sku, ...calcForecast(sku, leadDays, safetyDays) })),
-    [leadDays, safetyDays]
-  )
+  useEffect(() => {
+    analyticsApi.supplyForecast()
+      .then(setData)
+      .catch(() => setError('Ошибка загрузки данных'))
+      .finally(() => setLoading(false))
+  }, [])
 
-  const filtered = rows
+  const items = data?.items ?? []
+  const seasonCoeff = SEASONAL_COEFF[currentMonth] ?? 1.0
+
+  const filtered = items
     .filter(r => filterStatus === 'all' || r.status === filterStatus)
     .filter(r =>
-      r.sku.name.toLowerCase().includes(search.toLowerCase()) ||
-      r.sku.id.includes(search)
+      r.sku.includes(search) ||
+      (r.name || '').toLowerCase().includes(search.toLowerCase())
     )
-    .sort((a, b) => a.daysUntilOOS - b.daysUntilOOS)
 
-  const criticalCount = rows.filter(r => r.status === 'critical').length
-  const soonCount     = rows.filter(r => r.status === 'soon').length
-  const overstockCount = rows.filter(r => r.status === 'overstock').length
+  const criticalCount  = items.filter(r => r.status === 'critical').length
+  const soonCount      = items.filter(r => r.status === 'soon').length
+  const overstockCount = items.filter(r => r.status === 'overstock').length
 
-  const totalNeeded   = rows.reduce((s, r) => s + r.neededQty, 0)
-  const seasonCoeff   = SEASONAL_COEFF[currentMonth] ?? 1.0
+  if (loading) return (
+    <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>Загрузка данных поставок…</div>
+  )
+
+  if (error || !data?.has_data) return (
+    <div className="sf-page">
+      <div className="sf-header">
+        <div>
+          <h1 className="sf-title">📦 Прогноз поставок</h1>
+          <p className="sf-subtitle">Скорость продаж · Дней до обнуления · Рекомендации по заказу</p>
+        </div>
+      </div>
+      <div style={{
+        background: '#f8fafc', borderRadius: 12, padding: 40, textAlign: 'center',
+        border: '1px dashed #cbd5e1', color: '#64748b',
+      }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>📦</div>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Нет данных об остатках</div>
+        <div style={{ fontSize: 13 }}>
+          Нажми <strong>Синхронизировать</strong> в разделе <strong>🏪 Аккаунты</strong> — данные появятся автоматически.
+        </div>
+      </div>
+      <SeasonCalendar />
+    </div>
+  )
 
   return (
     <div className="sf-page">
       <div className="sf-header">
         <div>
           <h1 className="sf-title">📦 Прогноз поставок</h1>
-          <p className="sf-subtitle">Скорость продаж · Дней до обнуления · Рекомендации по заказу</p>
+          <p className="sf-subtitle">Скорость продаж · Дней до обнуления · Рекомендации по заказу · реальные данные</p>
         </div>
         <div className="sf-season-badge">
           <span className="sf-sb-label">Сейчас ({MONTH_NAMES[currentMonth-1]})</span>
@@ -147,29 +127,13 @@ export function SupplyForecast() {
           <span className="sf-sum-label">Избыток на складе</span>
         </div>
         <div className="sf-sum-card total">
-          <span className="sf-sum-num">{totalNeeded.toLocaleString('ru')}</span>
-          <span className="sf-sum-label">Единиц к заказу (итого)</span>
+          <span className="sf-sum-num">{items.length}</span>
+          <span className="sf-sum-label">Всего позиций</span>
         </div>
       </div>
 
       {/* Настройки */}
       <div className="sf-controls">
-        <div className="sf-control-group">
-          <label>Срок поставки (дней)</label>
-          <div className="sf-ctrl-row">
-            <input type="range" min={3} max={60} value={leadDays}
-              onChange={e => setLeadDays(Number(e.target.value))} />
-            <span className="sf-ctrl-val">{leadDays} дн</span>
-          </div>
-        </div>
-        <div className="sf-control-group">
-          <label>Страховой запас (дней)</label>
-          <div className="sf-ctrl-row">
-            <input type="range" min={7} max={90} value={safetyDays}
-              onChange={e => setSafetyDays(Number(e.target.value))} />
-            <span className="sf-ctrl-val">{safetyDays} дн</span>
-          </div>
-        </div>
         <div className="sf-control-group">
           <label>Поиск</label>
           <input className="sf-search" placeholder="Название или артикул…"
@@ -201,49 +165,40 @@ export function SupplyForecast() {
               <th>Скорость 7д</th>
               <th>Скорость 14д</th>
               <th>Скорость 30д</th>
-              <th>С сез. коэфф.</th>
               <th>Дней до нуля</th>
-              <th>К заказу</th>
               <th>Статус</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(({ sku, vel7, vel14, vel30, adjVel, daysUntilOOS, neededQty, status }) => (
-              <tr key={sku.id} className={`sf-row sf-row-${status}`}>
+            {filtered.map(r => (
+              <tr key={r.sku} className={`sf-row sf-row-${r.status}`}>
                 <td className="sf-col-name">
-                  <div className="sf-sku-name">{sku.name}</div>
-                  <div className="sf-sku-id">#{sku.id} · {sku.category}</div>
+                  {r.name
+                    ? <><div className="sf-sku-name">{r.name}</div><div className="sf-sku-id">#{r.sku}</div></>
+                    : <div className="sf-sku-name">#{r.sku}</div>
+                  }
                 </td>
-                <td className={`sf-num ${sku.stock === 0 ? 'zero' : sku.stock < 10 ? 'low' : ''}`}>
-                  {sku.stock === 0 ? '⚠ 0' : sku.stock}
+                <td className={`sf-num ${r.stock === 0 ? 'zero' : r.stock < 10 ? 'low' : ''}`}>
+                  {r.stock === 0 ? '⚠ 0' : r.stock}
                 </td>
-                <td className="sf-num">{vel7.toFixed(1)}/д</td>
-                <td className="sf-num">{vel14.toFixed(1)}/д</td>
-                <td className="sf-num">{vel30.toFixed(1)}/д</td>
-                <td className="sf-num sf-adj">
-                  {adjVel.toFixed(1)}/д
-                  <span className="sf-coeff-tag">×{SEASONAL_COEFF[currentMonth]?.toFixed(2)}</span>
-                </td>
-                <td className={`sf-num sf-days sf-days-${status}`}>
-                  {daysUntilOOS >= 999 ? '∞' : daysUntilOOS}
-                </td>
-                <td className={`sf-num sf-order ${neededQty > 0 ? 'needed' : ''}`}>
-                  {neededQty > 0 ? `+${neededQty}` : '—'}
+                <td className="sf-num">{r.vel_7d.toFixed(1)}/д</td>
+                <td className="sf-num">{r.vel_14d.toFixed(1)}/д</td>
+                <td className="sf-num">{r.vel_30d.toFixed(1)}/д</td>
+                <td className={`sf-num sf-days sf-days-${r.status}`}>
+                  {r.days_oos === null ? '∞' : r.days_oos}
                 </td>
                 <td>
-                  <span className={`sf-badge sf-badge-${status}`}>{STATUS_LABEL[status]}</span>
+                  <span className={`sf-badge sf-badge-${r.status}`}>{STATUS_LABEL[r.status]}</span>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} className="sf-empty">Нет товаров по фильтру</td></tr>
+              <tr><td colSpan={7} className="sf-empty">Нет товаров по фильтру</td></tr>
             )}
           </tbody>
         </table>
         <div className="sf-footer">
-          Показано {filtered.length} из {SKUS.length} ·
-          Срок поставки: {leadDays} дн · Страховой запас: {safetyDays} дн ·
-          Сезонный коэффициент текущего месяца: ×{seasonCoeff.toFixed(2)} · Данные демо
+          Показано {filtered.length} из {items.length} позиций · реальные данные WB
         </div>
       </div>
 

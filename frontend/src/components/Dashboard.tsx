@@ -6,6 +6,15 @@ import {
 import { analyticsApi, type DashboardSummary } from '../api'
 import './Dashboard.css'
 
+type Period = 'today' | 'yesterday' | '7d' | 'month' | 'custom'
+const PERIOD_LABELS: Record<Period, string> = {
+  today:     'Сегодня',
+  yesterday: 'Вчера',
+  '7d':      '7 дней',
+  month:     'Месяц',
+  custom:    'Свой период',
+}
+
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 
 const drrToOrders  = (row: SkuItem) => (totalSpend(row.promo) / row.ordersSum) * 100
@@ -86,10 +95,29 @@ export function Dashboard() {
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [sortAsc, setSortAsc] = useState(false)
   const [realData, setRealData] = useState<DashboardSummary | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    analyticsApi.dashboard().then(setRealData).catch(() => {})
-  }, [])
+  const [period, setPeriod] = useState<Period>('month')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo,   setCustomTo]   = useState('')
+
+  const loadData = (p: Period, from?: string, to?: string) => {
+    setLoading(true)
+    const params: { period: string; date_from?: string; date_to?: string } = { period: p }
+    if (p === 'custom' && from && to) { params.date_from = from; params.date_to = to }
+    analyticsApi.dashboard(params).then(setRealData).catch(() => {}).finally(() => setLoading(false))
+  }
+
+  useEffect(() => { loadData('month') }, [])
+
+  const handlePeriod = (p: Period) => {
+    setPeriod(p)
+    if (p !== 'custom') loadData(p)
+  }
+
+  const handleCustomApply = () => {
+    if (customFrom && customTo) loadData('custom', customFrom, customTo)
+  }
 
   const ordersCount = realData?.has_data ? realData.orders_count ?? 0 : totalOrders
   const ordersSum   = realData?.has_data ? realData.orders_sum   ?? 0 : totalOrdersSum
@@ -122,6 +150,39 @@ export function Dashboard() {
   return (
     <div className="dash">
 
+      {/* ── Выбор периода ─────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {(Object.keys(PERIOD_LABELS) as Period[]).map(p => (
+          <button
+            key={p}
+            onClick={() => handlePeriod(p)}
+            style={{
+              padding: '6px 14px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+              border: period === p ? '1px solid #6366f1' : '1px solid #e2e8f0',
+              background: period === p ? '#6366f1' : '#fff',
+              color: period === p ? '#fff' : '#374151',
+              fontWeight: period === p ? 700 : 400,
+            }}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+        {period === 'custom' && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
+            <span style={{ color: '#6b7280' }}>—</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
+            <button onClick={handleCustomApply}
+              style={{ padding: '5px 12px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
+              Применить
+            </button>
+          </div>
+        )}
+        {loading && <span style={{ color: '#9ca3af', fontSize: 13 }}>Загрузка…</span>}
+      </div>
+
       {isDemo && (
         <div style={{ background: '#1e3a2e', border: '1px solid #166534', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#86efac', fontSize: 13 }}>
           📊 Показаны демо-данные. Подключи реальный аккаунт в разделе <strong>🏪 Аккаунты</strong> для отображения твоей статистики.
@@ -139,7 +200,7 @@ export function Dashboard() {
         <div className="kpi-card">
           <div className="kpi-top"><span className="kpi-icon">💰</span><span className="kpi-label">Выручка</span></div>
           <div className="kpi-value">₽ {fmt(revenue)}</div>
-          <div className="kpi-sub">После возвратов</div>
+          <div className="kpi-sub">Сумма заказов − СПП</div>
           {isDemo && <div className="kpi-delta pos">▲ 8.1% vs вчера</div>}
         </div>
         {isDemo && (
@@ -355,7 +416,7 @@ export function Dashboard() {
             <table className="sku-table">
               <thead>
                 <tr>
-                  <th className="col-name">Артикул</th>
+                  <th className="col-name">Товар / SKU</th>
                   <th className="col-num">Заказов</th>
                   <th className="col-num">Выручка</th>
                 </tr>
@@ -364,7 +425,10 @@ export function Dashboard() {
                 {realData.top_skus.map(s => (
                   <tr key={s.sku} className="sku-row status-ok">
                     <td className="col-name">
-                      <div className="sku-name">#{s.sku}</div>
+                      {s.name
+                        ? <><div className="sku-name">{s.name}</div><div className="sku-id">#{s.sku}</div></>
+                        : <div className="sku-name">#{s.sku}</div>
+                      }
                     </td>
                     <td className="col-num">{s.orders_count} шт</td>
                     <td className="col-num">₽ {fmt(s.revenue ?? 0)}</td>
@@ -374,12 +438,17 @@ export function Dashboard() {
             </table>
           </div>
           <div className="sku-table-footer">
-            Данные за последние 30 дней · реальные
+            Топ-20 товаров за период · реальные данные
+            {!realData.top_skus[0]?.name && (
+              <span style={{ color: '#f59e0b', marginLeft: 8 }}>
+                · Нажми «Синхронизировать» в Аккаунтах для загрузки названий
+              </span>
+            )}
           </div>
         </div>
       )}
       {!isDemo && (!realData?.top_skus || realData.top_skus.length === 0) && (
-        <div style={{ background: '#1e293b', borderRadius: 10, padding: 32, textAlign: 'center', color: '#64748b', border: '1px solid #334155' }}>
+        <div style={{ background: '#f8fafc', borderRadius: 10, padding: 32, textAlign: 'center', color: '#64748b', border: '1px dashed #cbd5e1' }}>
           Нет данных по товарам. Нажми <strong>Синхронизировать</strong> в разделе <strong>🏪 Аккаунты</strong>.
         </div>
       )}

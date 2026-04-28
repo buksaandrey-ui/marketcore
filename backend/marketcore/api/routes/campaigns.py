@@ -15,7 +15,7 @@ from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.accounts import service as acc_service
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import AdStat, CampaignAutoSchedule, Order, SkuPrice, SkuStock, User
+from marketcore.models import AdStat, CampaignAutoSchedule, Order, SkuName, SkuPrice, SkuStock, User
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -177,6 +177,9 @@ class CampaignStatOut(BaseModel):
     advert_id: int
     name: str
     status: int | None = None
+    cpm_min: int | None = None         # рынок: минимальная ставка
+    cpm_competitive: int | None = None # рынок: конкурентная ставка (~3.5× от мин)
+    cpm_top10: int | None = None       # рынок: ставка для топ-10 (~5.5× от мин)
     views: int = 0
     clicks: int = 0
     spend: float = 0.0        # расход (уже с НДС в данных WB)
@@ -209,22 +212,39 @@ async def get_campaign_stats(
 
     advert_ids = [c["advert_id"] for c in campaigns]
     status_map = {c["advert_id"]: c.get("status") for c in campaigns}
+    # Имена из list_campaigns (уже обогащены через get_campaign_names)
+    name_map   = {c["advert_id"]: c["name"] for c in campaigns}
 
     date_to   = _dt.now(_tz.utc).strftime("%Y-%m-%d")
     date_from = (_dt.now(_tz.utc) - _td(days=days)).strftime("%Y-%m-%d")
+
+    # Рыночные ориентиры ставок (один запрос на аккаунт, авто-кампании type=8)
+    benchmark: dict | None = None
+    try:
+        benchmark = await client.get_market_cpm(advert_type=8, param=0)
+    except Exception:
+        pass
 
     try:
         stats = await client.get_campaign_detailed_stats(advert_ids, date_from, date_to)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"WB API (статистика): {e}")
 
+    cpm_min         = benchmark["min"]         if benchmark else None
+    cpm_competitive = benchmark["competitor"]  if benchmark else None
+    cpm_top10       = benchmark["top"]         if benchmark else None
+
     result = []
     for s in stats:
         drr = round(s["spend"] / s["revenue"] * 100, 1) if s["revenue"] > 0 else None
         result.append(CampaignStatOut(
             advert_id=s["advert_id"],
-            name=s["name"],
+            # Приоритет: реальное имя кампании → имя из статистики (первый товар) → fallback
+            name=name_map.get(s["advert_id"]) or s["name"],
             status=status_map.get(s["advert_id"]),
+            cpm_min=cpm_min,
+            cpm_competitive=cpm_competitive,
+            cpm_top10=cpm_top10,
             views=s["views"],
             clicks=s["clicks"],
             spend=round(s["spend"], 2),
@@ -243,6 +263,9 @@ async def get_campaign_stats(
                 advert_id=c["advert_id"],
                 name=c["name"],
                 status=c.get("status"),
+                cpm_min=cpm_min,
+                cpm_competitive=cpm_competitive,
+                cpm_top10=cpm_top10,
             ))
 
     return result
@@ -452,6 +475,89 @@ async def list_products_by_subject(
         })
 
     return sorted(subjects.values(), key=lambda x: x["subject_name"])
+
+
+@router.get("/sku-names", response_model=list[dict])
+async def list_sku_names(
+    account_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """SKU с реальными названиями (из таблицы sku_names) для массового создания кампаний."""
+    await acc_service.get_account(db, account_id, current_user.id)
+    rows = (await db.execute(
+        select(SkuName)
+        .where(SkuName.account_id == account_id, SkuName.name != "")
+        .order_by(SkuName.name)
+    )).scalars().all()
+    return [{"sku": r.sku, "name": r.name} for r in rows]
+
+
+class CreateSkuPackBody(BaseModel):
+    account_id: uuid.UUID
+    nm_ids: list[int]
+    budget: int = 500
+    cpm: int = 150
+    schedule_hours: list[int]  # 24 значения 0–100
+
+
+@router.post("/create-sku-pack", response_model=dict, status_code=201)
+async def create_sku_pack(
+    body: CreateSkuPackBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Создать одну авто-кампанию (CPM) на каждый выбранный SKU.
+
+    Название кампании = реальное название товара из sku_names (с граммовкой/объёмом).
+    Последовательно: создать кампанию → выставить CPM → применить расписание.
+    """
+    if len(body.schedule_hours) != 24:
+        raise HTTPException(status_code=400, detail="schedule_hours должен содержать ровно 24 элемента")
+
+    _, client = await _get_advert_client(body.account_id, current_user, db)
+
+    # Загружаем названия из нашей таблицы sku_names
+    nm_strs = [str(x) for x in body.nm_ids]
+    name_rows = (await db.execute(
+        select(SkuName).where(
+            SkuName.account_id == body.account_id,
+            SkuName.sku.in_(nm_strs),
+        )
+    )).scalars().all()
+    name_map = {r.sku: r.name for r in name_rows}
+
+    created: list[dict] = []
+    errors:  list[dict] = []
+
+    for nm_id in body.nm_ids:
+        raw_name = name_map.get(str(nm_id), f"SKU {nm_id}")
+        name = raw_name[:100]  # WB ограничивает до 100 символов
+
+        try:
+            advert_id = await client.create_auto_campaign([nm_id], body.budget, name)
+        except Exception as e:
+            errors.append({"nm_id": nm_id, "step": "create", "error": str(e)})
+            continue
+
+        try:
+            await client.set_campaign_cpm(advert_id=advert_id, advert_type=8, cpm=body.cpm, param=0)
+        except Exception as e:
+            errors.append({"nm_id": nm_id, "advert_id": advert_id, "step": "set_cpm", "error": str(e)})
+
+        try:
+            await client.set_campaign_hours(advert_id, body.schedule_hours)
+        except Exception as e:
+            errors.append({"nm_id": nm_id, "advert_id": advert_id, "step": "schedule", "error": str(e)})
+
+        created.append({"nm_id": nm_id, "advert_id": advert_id, "name": name})
+
+    return {
+        "created_count": len(created),
+        "error_count": len(errors),
+        "campaigns": created,
+        "errors": errors,
+    }
 
 
 @router.post("/create-category-pack", response_model=dict, status_code=201)

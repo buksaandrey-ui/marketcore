@@ -8,7 +8,7 @@ type TaxSystem = 'usn6' | 'usn15' | 'self'
 const TAX_LABELS: Record<TaxSystem, string> = {
   usn6:  'УСН 6% (с выручки)',
   usn15: 'УСН 15% (доходы − расходы)',
-  self:  'Самозанятый 6%',
+  self:  'Самозанятый 4% (физлицам)',
 }
 
 // ─── Расчёт экономики ─────────────────────────────────────────────────────────
@@ -35,8 +35,10 @@ function calcUnit(params: {
 
   let tax = 0
   if (taxSystem === 'usn6')  tax = Math.max(0, price * 0.06)
-  if (taxSystem === 'usn15') tax = Math.max(0, (price - commission - logEffective - cogs) * 0.15)
-  if (taxSystem === 'self')  tax = Math.max(0, price * 0.06)
+  // УСН 15%: реклама, хранение — тоже расходы, уменьшают налоговую базу
+  if (taxSystem === 'usn15') tax = Math.max(0, (price - commission - logEffective - cogs - storagePerUnit - promoSpend) * 0.15)
+  // Самозанятый: 4% при продажах физлицам через маркетплейс (не 6%)
+  if (taxSystem === 'self')  tax = Math.max(0, price * 0.04)
 
   const netProfit   = grossBeforeTax - tax
   const margin      = (netProfit / price) * 100

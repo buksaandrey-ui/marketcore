@@ -167,7 +167,21 @@ export type DashboardSummary = {
   ad_spend?: number
   drr_to_orders?: number
   drr_to_revenue?: number
-  top_skus?: { sku: string; orders_count: number; revenue: number }[]
+  top_skus?: { sku: string; name: string; orders_count: number; revenue: number }[]
+}
+
+export type SupplyForecastData = {
+  has_data: boolean
+  items: {
+    sku: string
+    name: string
+    stock: number
+    vel_7d: number
+    vel_14d: number
+    vel_30d: number
+    days_oos: number | null
+    status: 'critical' | 'soon' | 'ok' | 'overstock'
+  }[]
 }
 
 export type WbCampaign = {
@@ -221,8 +235,15 @@ export type SalesReport = {
 }
 
 export const analyticsApi = {
-  dashboard: (days = 30): Promise<DashboardSummary> =>
-    apiFetch<DashboardSummary>(`/analytics/dashboard?days=${days}`),
+  dashboard: (params: { period: string; date_from?: string; date_to?: string } = { period: 'month' }): Promise<DashboardSummary> => {
+    const q = new URLSearchParams({ period: params.period })
+    if (params.date_from) q.set('date_from', params.date_from)
+    if (params.date_to) q.set('date_to', params.date_to)
+    return apiFetch<DashboardSummary>(`/analytics/dashboard?${q}`)
+  },
+
+  supplyForecast: (): Promise<SupplyForecastData> =>
+    apiFetch<SupplyForecastData>('/analytics/supply-forecast'),
 
   heatmap: (days = 30): Promise<HeatmapData> =>
     apiFetch<HeatmapData>(`/analytics/orders/heatmap?days=${days}`),
@@ -341,6 +362,20 @@ export const campaignsApi = {
     schedule_hours: number[]
   }): Promise<CategoryPackResult> =>
     apiFetch<CategoryPackResult>('/campaigns/create-category-pack', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** Список SKU с реальными названиями из таблицы sku_names */
+  skuNames: (accountId: string): Promise<{ sku: string; name: string }[]> =>
+    apiFetch<{ sku: string; name: string }[]>(`/campaigns/sku-names?account_id=${accountId}`),
+
+  /** Создать одну авто-кампанию (CPM) на каждый выбранный SKU */
+  createSkuPack: (body: {
+    account_id: string
+    nm_ids: number[]
+    budget: number
+    cpm: number
+    schedule_hours: number[]
+  }): Promise<CategoryPackResult> =>
+    apiFetch<CategoryPackResult>('/campaigns/create-sku-pack', { method: 'POST', body: JSON.stringify(body) }),
 }
 
 export type AutoSchedule = {
@@ -383,6 +418,9 @@ export type CampaignStat = {
   advert_id: number
   name: string
   status: number | null
+  cpm_min: number | null        // рынок: минимальная ставка
+  cpm_competitive: number | null // рынок: конкурентная ставка
+  cpm_top10: number | null      // рынок: ставка для топ-10
   views: number
   clicks: number
   spend: number

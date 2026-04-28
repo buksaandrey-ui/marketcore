@@ -176,11 +176,9 @@ export function ReportsPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 20 }}>
             {[
               { label: 'Заказы (шт.)', value: fmt(d.units), color: '#38bdf8' },
-              { label: 'Сумма заказов', value: fmtR(d.orders_sum), color: '#38bdf8' },
-              { label: 'Выкуп (с СПП)', value: fmtR(d.buyout_sum), color: '#22c55e' },
-              { label: 'Услуги WB', value: fmtR(d.wb_services), color: '#f97316' },
+              { label: 'Выручка (с СПП)', value: fmtR(d.orders_sum), color: '#22c55e' },
               { label: 'Реклама', value: fmtR(d.ad_spend), color: '#ec4899' },
-              { label: 'К выплате', value: fmtR(d.amount_to_pay), color: d.amount_to_pay >= 0 ? '#22c55e' : '#ef4444' },
+              { label: 'К выплате (−реклама)', value: fmtR(d.amount_to_pay), color: d.amount_to_pay >= 0 ? '#22c55e' : '#ef4444' },
               { label: 'Реальный ДРР', value: `${d.real_drr}%`, color: d.real_drr < 15 ? '#22c55e' : d.real_drr < 25 ? '#f59e0b' : '#ef4444' },
             ].map(card => (
               <div key={card.label} style={{ background: '#1e293b', borderRadius: 12, padding: '14px 16px', border: '1px solid #334155' }}>

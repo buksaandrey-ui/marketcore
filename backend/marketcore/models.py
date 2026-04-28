@@ -102,6 +102,7 @@ class SkuStock(Base):
     sku: Mapped[str] = mapped_column(String(255), nullable=False)
     warehouse: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (PrimaryKeyConstraint("id", "recorded_at"),)
@@ -207,3 +208,12 @@ class CampaignAutoSchedule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+
+
+class SkuName(Base):
+    __tablename__ = "sku_names"
+
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, primary_key=True)
+    sku: Mapped[str] = mapped_column(String(255), nullable=False, primary_key=True)
+    name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

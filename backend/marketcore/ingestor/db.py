@@ -1,7 +1,8 @@
+import re
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -12,7 +13,7 @@ from marketcore.analytics.districts import (
     wb_warehouse_district,
 )
 from marketcore.config import settings
-from marketcore.models import Account, AdStat, Order, SkuPrice, SkuStock
+from marketcore.models import Account, AdStat, Order, SkuName, SkuPrice, SkuStock
 
 _engine = create_async_engine(settings.database_url)
 _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
@@ -31,6 +32,23 @@ async def get_account_with_key(account_id: str) -> tuple[Account, str]:
         return account, decrypt_api_key(account.api_key_cipher)
 
 
+def _wb_order_price(o: dict) -> float:
+    """Выручка по одному заказу WB = finishedPrice (цена после скидки продавца + СПП).
+
+    Приоритет полей из WB API:
+      finishedPrice  — итоговая цена, которую заплатил покупатель (после всех скидок + СПП)
+      priceWithDisc  — цена после скидки продавца, но до СПП
+      totalPrice     — полная цена без скидок (используется только как крайний запасной вариант)
+    """
+    fp = o.get("finishedPrice")
+    if fp is not None:
+        return float(fp)
+    pwd = o.get("priceWithDisc")
+    if pwd is not None:
+        return float(pwd)
+    return float(o.get("totalPrice", 0))
+
+
 async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:
     now = datetime.now(timezone.utc)
     rows = [
@@ -40,7 +58,7 @@ async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:
             "external_id": str(o.get("gNumber", o.get("srid", ""))),
             "sku": str(o.get("nmId", "")),
             "quantity": int(o.get("quantity", 1)),
-            "price": float(o.get("totalPrice", 0)),
+            "price": _wb_order_price(o),   # finishedPrice = totalPrice − скидка продавца − СПП
             "status": str(o.get("orderType", "unknown")),
             "warehouse": str(o.get("warehouseName", "")),
             "warehouse_district": wb_warehouse_district(o.get("warehouseName")),
@@ -53,6 +71,17 @@ async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:
     if not rows:
         return 0
     async with _session_factory() as session:
+        # TimescaleDB (гипертаблица) не поддерживает ON CONFLICT DO UPDATE.
+        # Решение: удаляем заказы за тот же период, потом вставляем свежие.
+        # Это исправляет старые записи с totalPrice → finishedPrice.
+        min_date = min(r["ordered_at"] for r in rows)
+        await session.execute(
+            delete(Order)
+            .where(Order.account_id == uuid.UUID(account_id))
+            .where(Order.ordered_at >= min_date)
+        )
+        # on_conflict_do_nothing нужен на случай если несколько товаров
+        # в одном заказе WB имеют одинаковый gNumber (одинаковый external_id)
         stmt = insert(Order).values(rows).on_conflict_do_nothing(
             constraint="uq_orders_account_external"
         )
@@ -102,6 +131,7 @@ async def save_stocks_wb(account_id: str, raw_stocks: list[dict]) -> int:
             "sku": str(s.get("nmId", "")),
             "warehouse": str(s.get("warehouseName", "")),
             "quantity": int(s.get("quantity", 0)),
+            "name": str(s.get("name") or s.get("subject") or ""),
             "recorded_at": now,
         }
         for s in raw_stocks
@@ -197,7 +227,7 @@ async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:
         for day in campaign.get("days", []):
             stat_date = _parse_dt(day.get("date", now.isoformat()))
             for app in day.get("apps", []):
-                for nm in app.get("nm", []):
+                for nm in (app.get("nms") or app.get("nm") or []):
                     rows.append({
                         "id": uuid.uuid4(),
                         "account_id": uuid.UUID(account_id),
@@ -214,6 +244,33 @@ async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:
     async with _session_factory() as session:
         stmt = insert(AdStat).values(rows).on_conflict_do_nothing(
             constraint="uq_ad_stats_unique"
+        )
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount
+
+
+async def save_sku_names(account_id: str, raw_stats: list[dict]) -> int:
+    """Сохраняет имена товаров nmId→name из ответа WB fullstats API."""
+    acc_uuid = uuid.UUID(account_id)
+    now = datetime.now(timezone.utc)
+    names: dict[str, str] = {}
+    for campaign in raw_stats:
+        for day in campaign.get("days", []):
+            for app in day.get("apps", []):
+                for nm in (app.get("nms") or app.get("nm") or []):
+                    sku = str(nm.get("nmId", ""))
+                    name = str(nm.get("name") or "").strip()
+                    if sku and name and sku not in names:
+                        names[sku] = name
+    if not names:
+        return 0
+    rows = [{"account_id": acc_uuid, "sku": sku, "name": name, "updated_at": now}
+            for sku, name in names.items()]
+    async with _session_factory() as session:
+        stmt = insert(SkuName).values(rows).on_conflict_do_update(
+            index_elements=["account_id", "sku"],
+            set_={"name": insert(SkuName).excluded.name, "updated_at": insert(SkuName).excluded.updated_at},
         )
         result = await session.execute(stmt)
         await session.commit()
@@ -244,6 +301,68 @@ async def save_ad_stats_ozon(account_id: str, raw_stats: list[dict]) -> int:
         result = await session.execute(stmt)
         await session.commit()
         return result.rowcount
+
+
+_WEIGHT_RE = re.compile(r'\d+[\.,]?\d*\s*(г|гр|кг|мл|л)\b', re.IGNORECASE)
+
+
+async def enrich_sku_names_with_params(account_id: str) -> int:
+    """Дополняет названия SKU параметрами объёма/веса из публичного WB API.
+
+    Пример: "Корневин удобрение для корней" → "Корневин удобрение для корней, 30 г"
+    Пропускает SKU, в названии которых уже есть числовой параметр (г/кг/мл/л).
+    Возвращает количество обновлённых строк.
+    """
+    from marketcore.ingestor.wb_client import WBClient
+
+    acc_uuid = uuid.UUID(account_id)
+    now = datetime.now(timezone.utc)
+
+    # Загружаем все sku_names для аккаунта
+    async with _session_factory() as session:
+        result = await session.execute(
+            select(SkuName).where(SkuName.account_id == acc_uuid)
+        )
+        sku_rows = list(result.scalars().all())
+
+    if not sku_rows:
+        return 0
+
+    # Только числовые артикулы WB (nmId)
+    nm_ids = [int(r.sku) for r in sku_rows if r.sku.isdigit()]
+    if not nm_ids:
+        return 0
+
+    # Запрашиваем параметры через публичный WB API (без ключа)
+    params_map = await WBClient.get_card_params(nm_ids)
+    if not params_map:
+        return 0
+
+    updated = 0
+    async with _session_factory() as session:
+        for row in sku_rows:
+            if not row.sku.isdigit():
+                continue
+            param = params_map.get(int(row.sku))
+            if not param:
+                continue
+            # Не добавляем если в названии уже есть вес/объём
+            if _WEIGHT_RE.search(row.name):
+                continue
+            # Не добавляем если параметр уже содержится в названии дословно
+            if param.lower() in row.name.lower():
+                continue
+            new_name = f"{row.name}, {param}"
+            await session.execute(
+                update(SkuName)
+                .where(SkuName.account_id == acc_uuid, SkuName.sku == row.sku)
+                .values(name=new_name, updated_at=now)
+            )
+            updated += 1
+        if updated:
+            await session.commit()
+
+    return updated
 
 
 async def _bulk_insert(model: type, rows: list[dict]) -> int:

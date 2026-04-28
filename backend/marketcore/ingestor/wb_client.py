@@ -124,6 +124,29 @@ class WBClient:
             "aggressive": round(min_cpc * 9.0),
         }
 
+    async def get_market_cpm(self, advert_type: int = 8, param: int = 0) -> dict[str, int]:
+        """Получить рыночные ориентиры CPM напрямую по числовому типу/параметру.
+
+        advert_type: 5=поиск, 6=каталог, 8=авто, 9=поиск+каталог
+        param: subject_id для поиска/каталога, 0 для авто
+
+        Возвращает {"min": N, "competitor": N, "top": N}
+        """
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{WB_ADV_BASE}/adv/v0/cpm",
+                headers=self._headers,
+                params={"type": advert_type, "param": param},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        min_cpm = int(data.get("cpm", 50))
+        return {
+            "min": min_cpm,
+            "competitor": round(min_cpm * 3.5),
+            "top": round(min_cpm * 5.5),
+        }
+
     # ─── Advert / Campaign management ─────────────────────────────────────────
 
     async def list_campaigns(self, statuses: list[int] | None = None) -> list[dict]:
@@ -418,38 +441,33 @@ class WBClient:
     async def get_campaign_detailed_stats(
         self, advert_ids: list[int], date_from: str, date_to: str
     ) -> list[dict]:
-        """Подробная статистика кампаний через POST /adv/v2/fullstats.
+        """Подробная статистика кампаний через GET /adv/v3/fullstats.
 
         Возвращает на каждую кампанию:
           advert_id, name (первый товар), spend, views, clicks,
           atbs (в корзину), orders (заказы), shks (выкуплено), revenue.
-        WB принимает до 10 кампаний и до 7 дат за запрос — делаем батчи.
+        Батчи по 50 кампаний, один запрос на батч.
         """
-        from datetime import datetime as _dt, timedelta as _td
-
-        # Список дат диапазона
-        start = _dt.strptime(date_from, "%Y-%m-%d")
-        end   = _dt.strptime(date_to,   "%Y-%m-%d")
-        dates: list[str] = []
-        cur = start
-        while cur <= end:
-            dates.append(cur.strftime("%Y-%m-%d"))
-            cur += _td(days=1)
+        import asyncio as _asyncio
 
         aggregated: dict[int, dict] = {}
 
-        # Батчи по 10 кампаний, 7 дат
-        for i in range(0, len(advert_ids), 10):
-            batch_ids = advert_ids[i : i + 10]
-            for j in range(0, len(dates), 7):
-                batch_dates = dates[j : j + 7]
-                payload = [{"id": aid, "dates": batch_dates} for aid in batch_ids]
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for i in range(0, len(advert_ids), 50):
+                batch_ids = advert_ids[i : i + 50]
+                ids_str = ",".join(str(x) for x in batch_ids)
                 try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.post(
-                            f"{WB_ADV_BASE}/adv/v2/fullstats",
+                    resp = await client.get(
+                        f"{WB_ADV_BASE}/adv/v3/fullstats",
+                        headers=self._headers,
+                        params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
+                    )
+                    if resp.status_code == 429:
+                        await _asyncio.sleep(2)
+                        resp = await client.get(
+                            f"{WB_ADV_BASE}/adv/v3/fullstats",
                             headers=self._headers,
-                            json=payload,
+                            params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
                         )
                     if resp.status_code != 200:
                         continue
@@ -468,37 +486,37 @@ class WBClient:
                             "atbs": 0, "orders": 0, "shks": 0, "revenue": 0.0,
                             "nm_ids": [],
                         }
-                    for nm in (row.get("nm") or []):
-                        nm_name = nm.get("name") or ""
-                        nm_id   = nm.get("nmId")
-                        aggregated[aid]["views"]   += nm.get("views",  0)
-                        aggregated[aid]["clicks"]  += nm.get("clicks", 0)
-                        aggregated[aid]["spend"]   += float(nm.get("sum",     0))
-                        aggregated[aid]["atbs"]    += nm.get("atbs",   0)
-                        aggregated[aid]["orders"]  += nm.get("orders", 0)
-                        aggregated[aid]["shks"]    += nm.get("shks",   0)
-                        aggregated[aid]["revenue"] += float(nm.get("revenue", 0))
-                        if nm_id and nm_id not in aggregated[aid]["nm_ids"]:
-                            aggregated[aid]["nm_ids"].append(nm_id)
-                        # Имя кампании = имя первого товара
-                        if nm_name and aggregated[aid]["name"].startswith("Кампания #"):
-                            aggregated[aid]["name"] = nm_name
+                    for day in row.get("days") or []:
+                        for app in day.get("apps") or []:
+                            for nm in app.get("nms") or []:
+                                nm_name = nm.get("name") or ""
+                                nm_id   = nm.get("nmId")
+                                aggregated[aid]["views"]   += int(nm.get("views",  0))
+                                aggregated[aid]["clicks"]  += int(nm.get("clicks", 0))
+                                aggregated[aid]["spend"]   += float(nm.get("sum",       0))
+                                aggregated[aid]["atbs"]    += int(nm.get("atbs",    0))
+                                aggregated[aid]["orders"]  += int(nm.get("orders",  0))
+                                aggregated[aid]["shks"]    += int(nm.get("shks",    0))
+                                aggregated[aid]["revenue"] += float(nm.get("sum_price", 0))
+                                if nm_id and nm_id not in aggregated[aid]["nm_ids"]:
+                                    aggregated[aid]["nm_ids"].append(nm_id)
+                                if nm_name and aggregated[aid]["name"].startswith("Кампания #"):
+                                    aggregated[aid]["name"] = nm_name
+
+                await _asyncio.sleep(0.5)
 
         return list(aggregated.values())
 
     async def get_ad_stats(self, date_from: str, date_to: str) -> list[dict]:
         """Получить статистику рекламных кампаний за период.
 
-        Шаг 1: получить список ID всех кампаний (активные + пауза + завершённые).
-        Шаг 2: POST /adv/v2/fullstats с батчами по 10 кампаний × 7 дат.
-        Шаг 3: преобразовать ответ в формат, совместимый с save_ad_stats_wb.
-
-        Формат возврата (для save_ad_stats_wb):
-          [{"advertId": int, "days": [{"date": str, "apps": [{"nm": [...]}]}]}]
+        Использует GET /adv/v3/fullstats (замена устаревшего POST /adv/v2/fullstats).
+        Параметры: ids (через запятую), beginDate, endDate (YYYY-MM-DD).
+        Ответ: [{advertId, days:[{date, apps:[{nms:[{nmId,views,clicks,sum,...}]}]}]}]
         """
-        from datetime import datetime as _dt, timedelta as _td
+        import asyncio as _asyncio
 
-        # 1. Список всех кампаний (все статусы включая завершённые)
+        # 1. Список всех кампаний (активные + пауза + завершённые)
         try:
             campaigns = await self.list_campaigns(statuses=[7, 9, 11])
         except Exception:
@@ -509,68 +527,67 @@ class WBClient:
 
         advert_ids = [c["advert_id"] for c in campaigns]
 
-        # 2. Список дат
-        start = _dt.strptime(date_from, "%Y-%m-%d")
-        end   = _dt.strptime(date_to,   "%Y-%m-%d")
-        dates: list[str] = []
-        cur = start
-        while cur <= end:
-            dates.append(cur.strftime("%Y-%m-%d"))
-            cur += _td(days=1)
-
-        # 3. Батчи по 10 кампаний и 7 дат, агрегируем в нужный формат
-        # Целевая структура для save_ad_stats_wb: {advertId: {date: {nmId: {...}}}}
+        # 2. Запрашиваем статистику батчами по 50 кампаний (лимит WB API)
         agg: dict[int, dict[str, dict[int, dict]]] = {}
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            for i in range(0, len(advert_ids), 10):
-                batch_ids = advert_ids[i:i + 10]
-                for j in range(0, len(dates), 7):
-                    batch_dates = dates[j:j + 7]
-                    payload = [{"id": aid, "dates": batch_dates} for aid in batch_ids]
-                    try:
-                        resp = await client.post(
-                            f"{WB_ADV_BASE}/adv/v2/fullstats",
+            for i in range(0, len(advert_ids), 50):
+                batch_ids = advert_ids[i:i + 50]
+                ids_str = ",".join(str(x) for x in batch_ids)
+                try:
+                    resp = await client.get(
+                        f"{WB_ADV_BASE}/adv/v3/fullstats",
+                        headers=self._headers,
+                        params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
+                    )
+                    if resp.status_code == 429:
+                        await _asyncio.sleep(2)
+                        resp = await client.get(
+                            f"{WB_ADV_BASE}/adv/v3/fullstats",
                             headers=self._headers,
-                            json=payload,
+                            params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
                         )
-                        if resp.status_code != 200:
-                            continue
-                        rows = resp.json() or []
-                    except Exception:
+                    if resp.status_code != 200:
                         continue
+                    rows = resp.json() or []
+                except Exception:
+                    continue
 
-                    for row in rows:
-                        aid = row.get("advertId")
-                        if not aid:
+                for row in rows:
+                    aid = row.get("advertId")
+                    if not aid:
+                        continue
+                    if aid not in agg:
+                        agg[aid] = {}
+                    # v3 ответ: {advertId, days:[{date, apps:[{appType, nms:[...]}]}]}
+                    for day in row.get("days") or []:
+                        d = (day.get("date") or "")[:10]
+                        if not d:
                             continue
-                        if aid not in agg:
-                            agg[aid] = {}
-                        # fullstats POST возвращает агрегаты по кампании без разбивки по дням
-                        # Распределяем суммарные данные равномерно по дням батча
-                        # (детальная разбивка по дням требует отдельного endpoint)
-                        nm_list = row.get("nm") or []
-                        n_days = len(batch_dates)
-                        for d in batch_dates:
-                            if d not in agg[aid]:
-                                agg[aid][d] = {}
-                            for nm in nm_list:
+                        if d not in agg[aid]:
+                            agg[aid][d] = {}
+                        for app in day.get("apps") or []:
+                            for nm in app.get("nms") or []:
                                 nm_id = nm.get("nmId")
                                 if not nm_id:
                                     continue
                                 if nm_id not in agg[aid][d]:
                                     agg[aid][d][nm_id] = {
                                         "nmId": nm_id,
+                                        "name": str(nm.get("name") or ""),
                                         "views": 0, "clicks": 0,
                                         "cpm": float(nm.get("cpm") or 0),
                                         "sum": 0.0,
                                     }
-                                # Делим на количество дней в батче (приближение)
-                                agg[aid][d][nm_id]["views"]  += int((nm.get("views")  or 0) / n_days)
-                                agg[aid][d][nm_id]["clicks"] += int((nm.get("clicks") or 0) / n_days)
-                                agg[aid][d][nm_id]["sum"]    += float((nm.get("sum")   or 0) / n_days)
+                                agg[aid][d][nm_id]["views"]  += int(nm.get("views")  or 0)
+                                agg[aid][d][nm_id]["clicks"] += int(nm.get("clicks") or 0)
+                                agg[aid][d][nm_id]["sum"]    += float(nm.get("sum")   or 0)
+                                if nm.get("name") and not agg[aid][d][nm_id]["name"]:
+                                    agg[aid][d][nm_id]["name"] = str(nm.get("name"))
 
-        # 4. Конвертируем в формат ожидаемый save_ad_stats_wb
+                await _asyncio.sleep(0.5)  # избегаем rate limit между батчами
+
+        # 3. Конвертируем в формат ожидаемый save_ad_stats_wb
         result = []
         for aid, dates_map in agg.items():
             days_list = []
@@ -578,10 +595,106 @@ class WBClient:
                 if any(v["views"] > 0 or v["sum"] > 0 for v in nm_map.values()):
                     days_list.append({
                         "date": d,
-                        "apps": [{"nm": list(nm_map.values())}],
+                        "apps": [{"nms": list(nm_map.values())}],
                     })
             if days_list:
                 result.append({"advertId": aid, "days": days_list})
+
+        return result
+
+    @staticmethod
+    def _wb_basket_url(nm_id: int, basket: int) -> str:
+        vol  = nm_id // 100000
+        part = nm_id // 1000
+        return f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/info/ru/card.json"
+
+    @staticmethod
+    def _basket_candidates(nm_id: int) -> list[int]:
+        """Список кандидатов корзины WB CDN для данного nm_id (наиболее вероятные сначала)."""
+        vol = nm_id // 100000
+        # Приблизительная формула: basket ≈ vol // 200, но WB расширяет CDN
+        center = max(1, vol // 200)
+        seen: set[int] = set()
+        result: list[int] = []
+        for delta in [0, 1, -1, 2, -2, 3, 4, 5, -3, 6, 7, 8]:
+            b = center + delta
+            if 1 <= b <= 40 and b not in seen:
+                seen.add(b)
+                result.append(b)
+        return result
+
+    @staticmethod
+    async def get_card_params(nm_ids: list[int]) -> dict[int, str]:
+        """Получить параметры объёма/веса/граммовки товаров через публичный WB CDN API.
+
+        Не требует авторизации. Возвращает {nm_id: "250 г"} / {nm_id: "1 л"} и т.п.
+        Используется для обогащения названий SKU: "Корневин" → "Корневин, 250 г".
+        """
+        if not nm_ids:
+            return {}
+
+        # Приоритетный порядок ключей характеристик (объём/вес без упаковки)
+        PARAM_PRIORITY = [
+            "объём", "объем",
+            "вес товара без упаковки",
+            "масса нетто", "масса товара",
+            "вес без упаковки", "масса без упаковки",
+            "вес нетто",
+            "граммовка",
+            "вместимость", "литраж",
+            "масса", "вес",
+        ]
+
+        result: dict[int, str] = {}
+        # Кэш vol_bucket → basket_num чтобы не проверять повторно
+        basket_cache: dict[int, int] = {}
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for nm_id in nm_ids:
+                bucket = nm_id // 100000
+                # Берём basket из кэша или ищем
+                basket = basket_cache.get(bucket)
+                if basket is None:
+                    for candidate in WBClient._basket_candidates(nm_id):
+                        try:
+                            r = await client.head(
+                                WBClient._wb_basket_url(nm_id, candidate)
+                            )
+                            if r.status_code == 200:
+                                basket = candidate
+                                basket_cache[bucket] = basket
+                                break
+                        except Exception:
+                            continue
+                if basket is None:
+                    continue
+
+                try:
+                    r = await client.get(WBClient._wb_basket_url(nm_id, basket))
+                    if r.status_code != 200:
+                        continue
+                    options = r.json().get("options") or []
+                    for key in PARAM_PRIORITY:
+                        for opt in options:
+                            opt_name = (opt.get("name") or "").lower()
+                            if key in opt_name:
+                                val = (opt.get("value") or "").strip()
+                                if val:
+                                    # Если единица указана в скобках в имени поля — добавляем
+                                    # Пример: "Объем (л)" → val="1" → "1 л"
+                                    import re as _re
+                                    unit_match = _re.search(r'\(([а-яёa-z]+)\)', opt_name)
+                                    if unit_match:
+                                        unit = unit_match.group(1)
+                                        has_unit = _re.search(r'[а-яёa-z]+', val, _re.IGNORECASE)
+                                        if not has_unit:
+                                            val = f"{val} {unit}"
+                                    result[nm_id] = val
+                                    break
+                        if nm_id in result:
+                            break
+                except Exception:
+                    continue
 
         return result
 

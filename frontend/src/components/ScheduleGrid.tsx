@@ -4,7 +4,7 @@ import './ScheduleGrid.css'
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
-const PALETTE = [0, 30, 50, 80, 100, 120, 150, 200]
+const PALETTE = [0, 10, 30, 50, 70, 80, 90, 100]
 
 type Grid = number[][]
 type Platform = 'wb' | 'ozon'
@@ -60,16 +60,15 @@ function makeGrid(value = 100): Grid {
 
 function cellColor(pct: number): string {
   if (pct === 0) return '#f3f4f6'
-  if (pct < 40) return '#e8f5e9'
-  if (pct < 70) return '#c8e6c9'
-  if (pct < 110) return '#81c784'
-  if (pct < 140) return '#ffe082'
-  if (pct < 170) return '#ffcc80'
-  return '#ffb74d'
+  if (pct <= 20) return '#e8f5e9'
+  if (pct <= 40) return '#c8e6c9'
+  if (pct <= 60) return '#81c784'
+  if (pct <= 80) return '#4caf50'
+  return '#2e7d32'
 }
 
 function textColor(pct: number): string {
-  return pct >= 70 && pct < 110 ? '#fff' : '#1f2937'
+  return pct > 40 ? '#fff' : '#1f2937'
 }
 
 function categorize(price: number, b: Benchmarks): Category {
@@ -120,26 +119,26 @@ const SCHEDULE_PRESETS: Preset[] = [
   {
     key: 'prime',
     label: '🌆 Вечерний прайм',
-    hint: '19–22 → 150%, 10–18 → 100%, остальное → 60%',
+    hint: '19–22 → 100%, 10–18 → 80%, остальное → 50%',
     make: () =>
       DAYS.map(() =>
         HOURS.map((h) => {
           if (h <= 5) return 0
-          if (h >= 19 && h <= 22) return 150
-          if (h >= 10 && h <= 18) return 100
-          return 60
+          if (h >= 19 && h <= 22) return 100
+          if (h >= 10 && h <= 18) return 80
+          return 50
         })
       ),
   },
   {
     key: 'weekend',
     label: '📅 Выходные+',
-    hint: 'Сб–Вс → 130%, будни → 90%, ночь → 0%',
+    hint: 'Сб–Вс → 100%, будни → 80%, ночь → 0%',
     make: () =>
       DAYS.map((_, d) =>
         HOURS.map((h) => {
           if (h <= 5) return 0
-          return d >= 5 ? 130 : 90
+          return d >= 5 ? 100 : 80
         })
       ),
   },
@@ -152,14 +151,14 @@ const SCHEDULE_PRESETS: Preset[] = [
   {
     key: 'peak',
     label: '📈 Двойной пик',
-    hint: 'Будни 10–13 и 19–22 → 200%, Сб–Вс 12–20 → 150%, ночь → 0%',
+    hint: 'Будни 10–13 и 19–22 → 100%, Сб–Вс 12–20 → 80%, ночь 0–6 → 0%',
     make: () =>
       DAYS.map((_, d) =>
         HOURS.map((h) => {
           if (h <= 5) return 0
-          if (d < 5 && ((h >= 10 && h <= 13) || (h >= 19 && h <= 22))) return 200
-          if (d >= 5 && h >= 12 && h <= 20) return 150
-          return 80
+          if (d < 5 && ((h >= 10 && h <= 13) || (h >= 19 && h <= 22))) return 100
+          if (d >= 5 && h >= 12 && h <= 20) return 80
+          return 50
         })
       ),
   },
@@ -168,21 +167,21 @@ const SCHEDULE_PRESETS: Preset[] = [
 // ─── Демо-каталог товаров (заглушка, потом придёт с бэкенда) ───
 type SkuItem = { id: string; name: string }
 const DEMO_CATALOG: SkuItem[] = [
-  { id: '12345678', name: 'Кроссовки Nike Air Max 270 белые' },
-  { id: '23456789', name: 'Футболка Adidas Originals мужская' },
-  { id: '34567890', name: 'Джинсы Levi\'s 501 синие' },
-  { id: '45678901', name: 'Куртка зимняя Columbia Omni-Heat' },
-  { id: '56789012', name: 'Наушники Sony WH-1000XM5' },
-  { id: '67890123', name: 'Смартфон Samsung Galaxy A54' },
+  { id: '12345678', name: 'Кроссовки CloudStep Air 270 белые' },
+  { id: '23456789', name: 'Футболка SpeedLine Classic мужская' },
+  { id: '34567890', name: 'Джинсы UrbanFit 501 синие' },
+  { id: '45678901', name: 'Куртка зимняя ThermoShield Pro' },
+  { id: '56789012', name: 'Наушники SoundMax WH-500 чёрные' },
+  { id: '67890123', name: 'Смартфон QuantumX A54 128GB' },
   { id: '78901234', name: 'Платье летнее в горошек' },
-  { id: '89012345', name: 'Рюкзак городской HIKE 30L серый' },
+  { id: '89012345', name: 'Рюкзак городской TrailPack 30L серый' },
   { id: '90123456', name: 'Крем для лица SPF50 увлажняющий' },
-  { id: '11223344', name: 'Кофе в зёрнах Lavazza 1кг' },
-  { id: '22334455', name: 'Игрушка конструктор LEGO City' },
-  { id: '33445566', name: 'Книга «Атомные привычки» Джеймс Клир' },
-  { id: '44556677', name: 'Кастрюля нержавеющая 5л Tefal' },
+  { id: '11223344', name: 'Кофе в зёрнах Arabica Premium 1кг' },
+  { id: '22334455', name: 'Конструктор CityBlock 500 деталей' },
+  { id: '33445566', name: 'Книга «Привычки чемпионов» А. Соколов' },
+  { id: '44556677', name: 'Кастрюля нержавеющая 5л ProCook' },
   { id: '55667788', name: 'Коврик для йоги 10мм TPE фиолетовый' },
-  { id: '66778899', name: 'Протеин Optimum Nutrition Gold Standard' },
+  { id: '66778899', name: 'Протеин WheyPure Gold Standard 2кг' },
 ]
 
 function searchSkus(query: string): SkuItem[] {
@@ -223,7 +222,7 @@ export function ScheduleGrid() {
   const [bench, setBench] = useState<Benchmarks>(DEFAULTS.cpm.bench)
   const [grid, setGrid] = useState<Grid>(() => makeGrid(100))
   const [hover, setHover] = useState<{ d: number; h: number } | null>(null)
-  const [activeValue, setActiveValue] = useState<number>(150)
+  const [activeValue, setActiveValue] = useState<number>(100)
   const [customValue, setCustomValue] = useState<string>('')
   const [painting, setPainting] = useState(false)
 
@@ -1355,7 +1354,7 @@ export function ScheduleGrid() {
             type="number"
             placeholder="своё"
             min={0}
-            max={300}
+            max={100}
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && applyCustom()}
@@ -1500,7 +1499,7 @@ export function ScheduleGrid() {
           />
         </label>
         <div className="presets">
-          <button onClick={resetAll}>Сбросить всё к 100%</button>
+          <button onClick={resetAll}>Залить всё на 100% (максимум)</button>
           <button onClick={paintAll}>Залить всё кистью ({activeValue}%)</button>
         </div>
       </div>

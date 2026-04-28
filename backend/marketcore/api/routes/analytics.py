@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from marketcore.analytics.localization import LIZone, LocalizationService
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import Account, AdStat, Order, SkuStock, User
+from marketcore.models import Account, AdStat, Order, SkuName, SkuStock, User
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -66,6 +66,9 @@ async def refresh_localization(
 @router.get("/dashboard")
 async def get_dashboard_summary(
     days: int = Query(30),
+    period: str = Query("custom"),
+    date_from_str: str | None = Query(None, alias="date_from"),
+    date_to_str: str | None = Query(None, alias="date_to"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
@@ -77,33 +80,63 @@ async def get_dashboard_summary(
         return {"has_data": False, "accounts": []}
 
     account_ids = [a.id for a in accounts]
-    date_from = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Определяем период
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "today":
+        date_from = today_start
+        date_to = now
+    elif period == "yesterday":
+        date_from = today_start - timedelta(days=1)
+        date_to = today_start
+    elif period == "7d":
+        date_from = today_start - timedelta(days=7)
+        date_to = now
+    elif period == "month":
+        date_from = today_start - timedelta(days=30)
+        date_to = now
+    elif period == "custom" and date_from_str and date_to_str:
+        date_from = datetime.fromisoformat(date_from_str).replace(tzinfo=timezone.utc)
+        date_to = datetime.fromisoformat(date_to_str).replace(tzinfo=timezone.utc) + timedelta(days=1)
+    else:
+        date_from = now - timedelta(days=days)
+        date_to = now
 
     orders_row = (await db.execute(
         select(
             func.count(Order.id).label("cnt"),
             func.coalesce(func.sum(Order.price * Order.quantity), 0).label("orders_sum"),
-        ).where(Order.account_id.in_(account_ids), Order.ordered_at >= date_from)
+        ).where(Order.account_id.in_(account_ids), Order.ordered_at >= date_from, Order.ordered_at <= date_to)
     )).one()
 
     ad_spend = float((await db.execute(
         select(func.coalesce(func.sum(AdStat.spend), 0)).where(
-            AdStat.account_id.in_(account_ids), AdStat.stat_date >= date_from
+            AdStat.account_id.in_(account_ids), AdStat.stat_date >= date_from, AdStat.stat_date <= date_to
         )
     )).scalar_one())
 
     stock_rows = (await db.execute(
         select(Order.sku, func.count(Order.id).label("cnt"), func.sum(Order.price * Order.quantity).label("revenue"))
-        .where(Order.account_id.in_(account_ids), Order.ordered_at >= date_from)
+        .where(Order.account_id.in_(account_ids), Order.ordered_at >= date_from, Order.ordered_at <= date_to)
         .group_by(Order.sku)
         .order_by(func.sum(Order.price * Order.quantity).desc())
         .limit(20)
     )).all()
 
+    # Настоящие названия товаров из рекламного API (sku_names), не категории
+    name_rows = (await db.execute(
+        select(SkuName.sku, SkuName.name)
+        .where(SkuName.account_id.in_(account_ids), SkuName.name != "")
+    )).all()
+    sku_names = {r.sku: r.name for r in name_rows}
+
     orders_sum = float(orders_row.orders_sum)
-    revenue = orders_sum * 0.88
+    # Выручка = сумма finishedPrice × quantity (price уже хранится как finishedPrice после исправления)
+    # Не умножаем на коэффициент: finishedPrice = totalPrice − скидка продавца − СПП
+    revenue = orders_sum
     drr_to_orders = (ad_spend / orders_sum * 100) if orders_sum > 0 else 0
-    drr_to_revenue = (ad_spend / revenue * 100) if revenue > 0 else 0
+    drr_to_revenue = drr_to_orders  # revenue совпадает с orders_sum
 
     return {
         "has_data": True,
@@ -114,7 +147,7 @@ async def get_dashboard_summary(
         "ad_spend": ad_spend,
         "drr_to_orders": round(drr_to_orders, 1),
         "drr_to_revenue": round(drr_to_revenue, 1),
-        "top_skus": [{"sku": r.sku, "orders_count": r.cnt, "revenue": float(r.revenue)} for r in stock_rows],
+        "top_skus": [{"sku": r.sku, "name": sku_names.get(r.sku, ""), "orders_count": r.cnt, "revenue": float(r.revenue)} for r in stock_rows],
     }
 
 
@@ -251,9 +284,11 @@ async def sales_report(
 
     orders_sum = float(totals.orders_sum)
     units = int(totals.units)
-    buyout_sum = orders_sum * 0.88          # ~12% возвратов по умолчанию
-    wb_services = orders_sum * 0.05         # ~5% хранение + логистика (оценка)
-    amount_to_pay = buyout_sum - wb_services - ad_spend
+    # Выручка = сумма finishedPrice × quantity (уже с учётом скидки продавца + СПП)
+    # Возвраты в WB-заказах не отделены на уровне нашей БД — показываем gross revenue
+    buyout_sum = orders_sum
+    wb_services = 0.0   # точные данные доступны через WB финансовый отчёт (раздел "Общий ДРР")
+    amount_to_pay = buyout_sum - ad_spend
     real_drr = (ad_spend / buyout_sum * 100) if buyout_sum > 0 else 0
 
     return {
@@ -270,3 +305,99 @@ async def sales_report(
         "stock_by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "qty": int(r.qty)} for r in stock_rows],
         "by_sku": [{"sku": r.sku, "units": int(r.units), "orders_sum": float(r.orders_sum)} for r in sku_rows],
     }
+
+
+@router.get("/supply-forecast")
+async def get_supply_forecast(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Прогноз поставок на основе реальных остатков и заказов за 30 дней."""
+    accounts_result = await db.execute(
+        select(Account).where(Account.user_id == current_user.id, Account.status == "active")
+    )
+    accounts = list(accounts_result.scalars().all())
+    if not accounts:
+        return {"has_data": False, "items": []}
+
+    account_ids = [a.id for a in accounts]
+    now = datetime.now(timezone.utc)
+    date_30d = now - timedelta(days=30)
+    date_7d  = now - timedelta(days=7)
+    date_14d = now - timedelta(days=14)
+
+    # Остатки по SKU (агрегированные по всем складам)
+    stock_rows = (await db.execute(
+        select(SkuStock.sku, func.sum(SkuStock.quantity).label("stock"))
+        .where(SkuStock.account_id.in_(account_ids))
+        .group_by(SkuStock.sku)
+    )).all()
+
+    if not stock_rows:
+        return {"has_data": False, "items": []}
+
+    # Настоящие названия товаров из рекламного API
+    sn_rows = (await db.execute(
+        select(SkuName.sku, SkuName.name)
+        .where(SkuName.account_id.in_(account_ids), SkuName.name != "")
+    )).all()
+    sku_name_map = {r.sku: r.name for r in sn_rows}
+
+    # Заказы за 30 дней для расчёта скоростей
+    order_rows = (await db.execute(
+        select(Order.sku, func.count(Order.id).label("cnt"))
+        .where(Order.account_id.in_(account_ids), Order.ordered_at >= date_30d)
+        .group_by(Order.sku)
+    )).all()
+
+    order_rows_7d = (await db.execute(
+        select(Order.sku, func.count(Order.id).label("cnt"))
+        .where(Order.account_id.in_(account_ids), Order.ordered_at >= date_7d)
+        .group_by(Order.sku)
+    )).all()
+
+    order_rows_14d = (await db.execute(
+        select(Order.sku, func.count(Order.id).label("cnt"))
+        .where(Order.account_id.in_(account_ids), Order.ordered_at >= date_14d)
+        .group_by(Order.sku)
+    )).all()
+
+    vel30 = {r.sku: r.cnt / 30 for r in order_rows}
+    vel7  = {r.sku: r.cnt / 7  for r in order_rows_7d}
+    vel14 = {r.sku: r.cnt / 14 for r in order_rows_14d}
+
+    items = []
+    for row in stock_rows:
+        sku = row.sku
+        stock = int(row.stock)
+        name = sku_name_map.get(sku, "")
+        v30 = vel30.get(sku, 0.0)
+        v7  = vel7.get(sku, 0.0)
+        v14 = vel14.get(sku, 0.0)
+        adj_vel = v30  # базовая скорость
+        days_oos = int(stock / adj_vel) if adj_vel > 0 else 999
+
+        if stock == 0:
+            status = "critical"
+        elif days_oos <= 14:
+            status = "critical"
+        elif days_oos <= 35:
+            status = "soon"
+        elif stock > adj_vel * 90:
+            status = "overstock"
+        else:
+            status = "ok"
+
+        items.append({
+            "sku": sku,
+            "name": name,
+            "stock": stock,
+            "vel_7d": round(v7, 2),
+            "vel_14d": round(v14, 2),
+            "vel_30d": round(v30, 2),
+            "days_oos": days_oos if days_oos < 999 else None,
+            "status": status,
+        })
+
+    items.sort(key=lambda x: (x["days_oos"] if x["days_oos"] is not None else 9999))
+    return {"has_data": True, "items": items}

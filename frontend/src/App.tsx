@@ -3,6 +3,7 @@ import { Dashboard }           from './components/Dashboard'
 import { UnitEcon }            from './components/UnitEcon'
 import { SupplyForecast }      from './components/SupplyForecast'
 import { WbCampaignManager }   from './components/WbCampaignManager'
+import { ScheduleGrid }        from './components/ScheduleGrid'
 import { LoginPage }           from './components/LoginPage'
 import AccountsPage            from './components/AccountsPage'
 import { BehaviorPage }        from './components/BehaviorPage'
@@ -10,13 +11,14 @@ import { ReportsPage }         from './components/ReportsPage'
 import { BotHistoryPage }      from './components/BotHistoryPage'
 import './App.css'
 
-type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'bot-history' | 'accounts' | 'behavior' | 'reports'
+type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'schedule' | 'bot-history' | 'accounts' | 'behavior' | 'reports'
 
 const NAV: { id: Page; icon: string; label: string }[] = [
   { id: 'dashboard',   icon: '📊', label: 'Дашборд'        },
   { id: 'unit-econ',   icon: '📐', label: 'Юнит-экономика' },
   { id: 'supply',      icon: '📦', label: 'Поставки'       },
-  { id: 'bidding',     icon: '📣', label: 'Ставки и РК'    },
+  { id: 'bidding',     icon: '📣', label: 'Кампании WB'    },
+  { id: 'schedule',    icon: '🕐', label: 'Ставки'         },
   { id: 'bot-history', icon: '🤖', label: 'История бота'   },
   { id: 'behavior',    icon: '📈', label: 'Поведение'      },
   { id: 'reports',     icon: '📋', label: 'Отчёты'         },
@@ -69,8 +71,8 @@ export default function App() {
         {page === 'behavior'    && <BehaviorPage />}
         {page === 'reports'     && <ReportsPage />}
         {page === 'accounts'    && <AccountsPage />}
-
-        {page === 'bidding' && <WbCampaignManager />}
+        {page === 'bidding'     && <WbCampaignManager />}
+        {page === 'schedule'    && <ScheduleGrid />}
       </main>
     </div>
   )

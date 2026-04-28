@@ -85,7 +85,7 @@ async def sync_account(
 
     try:
         if account.marketplace == "wb":
-            from marketcore.ingestor.db import save_ad_stats_wb, save_orders_wb, save_prices_wb, save_stocks_wb
+            from marketcore.ingestor.db import enrich_sku_names_with_params, save_ad_stats_wb, save_orders_wb, save_prices_wb, save_sku_names, save_stocks_wb
             from marketcore.ingestor.wb_client import WBClient
             client = WBClient(api_key)
             orders = await client.get_orders(date_from)
@@ -98,10 +98,20 @@ async def sync_account(
             except Exception:
                 results["prices"] = 0
             try:
-                ad_stats = await client.get_ad_stats(date_str_from, date_str_to)
+                # Рекламная статистика требует отдельного ключа из advertise.wildberries.ru
+                advert_key = (
+                    decrypt_api_key(account.advert_api_key_cipher)
+                    if account.advert_api_key_cipher
+                    else api_key
+                )
+                advert_client = WBClient(advert_key)
+                ad_stats = await advert_client.get_ad_stats(date_str_from, date_str_to)
                 results["ad_stats"] = await save_ad_stats_wb(account_id_str, ad_stats)
-            except Exception:
+                results["sku_names"] = await save_sku_names(account_id_str, ad_stats)
+                results["sku_params"] = await enrich_sku_names_with_params(account_id_str)
+            except Exception as ad_err:
                 results["ad_stats"] = 0
+                results["ad_stats_error"] = str(ad_err)
         else:
             from marketcore.ingestor.db import save_ad_stats_ozon, save_orders_ozon, save_prices_ozon, save_stocks_ozon
             from marketcore.ingestor.ozon_client import OzonClient
@@ -129,6 +139,74 @@ async def sync_account(
     await db.commit()
 
     return {"status": "ok", "synced": results}
+
+
+@router.get("/{account_id}/debug-ad-stats")
+async def debug_ad_stats(
+    account_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Отладка: вызывает get_ad_stats напрямую и возвращает сырой результат."""
+    try:
+        account = await service.get_account(db, account_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    if account.marketplace != "wb":
+        return {"error": "Только для WB"}
+
+    advert_key = (
+        decrypt_api_key(account.advert_api_key_cipher)
+        if account.advert_api_key_cipher
+        else decrypt_api_key(account.api_key_cipher)
+    )
+
+    from marketcore.ingestor.wb_client import WBClient
+    import httpx as _httpx
+
+    client = WBClient(advert_key)
+    date_str_from = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+    date_str_to   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Шаг 1: список кампаний
+    try:
+        campaigns = await client.list_campaigns(statuses=[7, 9, 11])
+    except Exception as e:
+        return {"step": "list_campaigns", "error": str(e)}
+
+    if not campaigns:
+        return {"step": "list_campaigns", "result": "empty", "campaigns_count": 0}
+
+    # Шаг 2: тестируем разные endpoint для статистики
+    advert_ids = [c["advert_id"] for c in campaigns[:3]]
+    payload = [{"id": aid, "dates": [date_str_from, date_str_to]} for aid in advert_ids]
+    results_map: dict = {
+        "campaigns_total": len(campaigns),
+        "sample_ids": advert_ids,
+        "date_from": date_str_from,
+        "date_to": date_str_to,
+        "endpoints_tested": {},
+    }
+
+    aid0 = advert_ids[0]
+    # Тестируем правильный endpoint с верными параметрами
+    async with _httpx.AsyncClient(timeout=30.0) as http:
+        try:
+            resp = await http.get(
+                "https://advert-api.wildberries.ru/adv/v3/fullstats",
+                headers={"Authorization": advert_key},
+                params={"ids": str(aid0), "beginDate": date_str_from, "endDate": date_str_to},
+            )
+            results_map["v3_fullstats_test"] = {
+                "campaign_id": aid0,
+                "status": resp.status_code,
+                "body": resp.text[:2000],
+            }
+        except Exception as e:
+            results_map["v3_fullstats_test"] = {"error": str(e)}
+
+    return results_map
 
 
 @router.get("/{account_id}/debug-wb-advert")
