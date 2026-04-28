@@ -219,6 +219,20 @@ class SkuName(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class CampaignName(Base):
+    """Кешированные имена рекламных кампаний WB.
+    Обновляются при синхронизации или при первом вызове /campaigns.
+    """
+    __tablename__ = "campaign_names"
+
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, primary_key=True)
+    advert_id: Mapped[int] = mapped_column(Integer, nullable=False, primary_key=True)
+    name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    campaign_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class CampaignStrategy(Base):
     """Конфигурация стратегии «2 пика» для рекламной кампании WB."""
     __tablename__ = "campaign_strategies"

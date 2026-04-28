@@ -204,6 +204,92 @@ async def create_or_update_strategy(
     return new_strategy
 
 
+@router.post("/two-peaks/bulk")
+async def bulk_create_or_update_strategy(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Массовое создание/обновление стратегий «2 пика» сразу для N кампаний.
+
+    body: {
+      account_id: str,
+      campaign_ids: list[int],        # список ID кампаний
+      category: str,
+      cpm_min: int, cpm_cap: int,
+      drr_threshold_pct: float,
+      min_stock: int,
+      dry_run: bool,
+      ...
+    }
+    Возвращает: {created: int, updated: int, total: int}
+    """
+    from pydantic import BaseModel as BM
+
+    # Валидируем вручную
+    account_id_raw = body.get("account_id")
+    campaign_ids = body.get("campaign_ids", [])
+
+    if not account_id_raw or not campaign_ids:
+        raise HTTPException(status_code=400, detail="account_id и campaign_ids обязательны")
+
+    try:
+        account_id_uuid = uuid.UUID(str(account_id_raw))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный account_id")
+
+    try:
+        await acc_service.get_account(db, account_id_uuid, current_user.id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+
+    now = datetime.now(timezone.utc)
+    created = 0
+    updated = 0
+
+    for campaign_id in campaign_ids:
+        campaign_id = int(campaign_id)
+
+        stmt = select(CampaignStrategy).where(
+            CampaignStrategy.account_id == account_id_uuid,
+            CampaignStrategy.campaign_id == campaign_id,
+        )
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+
+        params = dict(
+            category=body.get("category", "universal"),
+            cpm_min=int(body.get("cpm_min", 100)),
+            cpm_cap=int(body.get("cpm_cap", 5000)),
+            drr_threshold_pct=float(body.get("drr_threshold_pct", 15.0)),
+            min_stock=int(body.get("min_stock", 5)),
+            budget_warning_pct=float(body.get("budget_warning_pct", 80.0)),
+            budget_stop_pct=float(body.get("budget_stop_pct", 95.0)),
+            dry_run=bool(body.get("dry_run", True)),
+            use_history=bool(body.get("use_history", True)),
+            history_min_days=int(body.get("history_min_days", 14)),
+        )
+
+        if existing:
+            for k, v in params.items():
+                setattr(existing, k, v)
+            existing.updated_at = now
+            updated += 1
+        else:
+            new_s = CampaignStrategy(
+                user_id=current_user.id,
+                account_id=account_id_uuid,
+                campaign_id=campaign_id,
+                strategy_type="two_peaks",
+                enabled=True,
+                **params,
+            )
+            db.add(new_s)
+            created += 1
+
+    await db.commit()
+    return {"created": created, "updated": updated, "total": created + updated}
+
+
 @router.get("", response_model=list[StrategyOut])
 async def list_strategies(
     account_id: uuid.UUID = Query(...),

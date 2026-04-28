@@ -15,7 +15,7 @@ from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.accounts import service as acc_service
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import AdStat, CampaignAutoSchedule, Order, SkuName, SkuPrice, SkuStock, User
+from marketcore.models import AdStat, CampaignAutoSchedule, CampaignName, Order, SkuName, SkuPrice, SkuStock, User
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -81,19 +81,99 @@ class SkuOut(BaseModel):
     stock: int | None = None
 
 
+# ─── helpers: кеш имён кампаний ──────────────────────────────────────────────
+
+async def _save_campaign_names_cache(
+    db: AsyncSession, account_id: uuid.UUID, campaigns: list[dict]
+) -> None:
+    """Сохраняет имена кампаний в таблицу campaign_names (INSERT ON CONFLICT DO UPDATE)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from datetime import datetime, timezone
+
+    if not campaigns:
+        return
+    rows = [
+        {
+            "account_id": account_id,
+            "advert_id": c["advert_id"],
+            "name": c["name"],
+            "campaign_type": c.get("type"),
+            "status": c.get("status"),
+            "updated_at": datetime.now(timezone.utc),
+        }
+        for c in campaigns
+    ]
+    stmt = pg_insert(CampaignName).values(rows).on_conflict_do_update(
+        index_elements=["account_id", "advert_id"],
+        set_={"name": pg_insert(CampaignName).excluded.name,
+              "campaign_type": pg_insert(CampaignName).excluded.campaign_type,
+              "status": pg_insert(CampaignName).excluded.status,
+              "updated_at": pg_insert(CampaignName).excluded.updated_at},
+    )
+    try:
+        await db.execute(stmt)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+
+async def _load_cached_names(
+    db: AsyncSession, account_id: uuid.UUID
+) -> dict[int, dict]:
+    """Читает имена кампаний из БД-кеша. Возвращает {advert_id: {name, type, status}}."""
+    stmt = select(CampaignName).where(CampaignName.account_id == account_id)
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        r.advert_id: {"name": r.name, "type": r.campaign_type, "status": r.status}
+        for r in rows
+    }
+
+
 # ─── endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[CampaignOut])
 async def list_campaigns(
     account_id: uuid.UUID = Query(...),
+    from_cache: bool = Query(False, description="Читать из БД-кеша без вызова WB API"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CampaignOut]:
+    """Список рекламных кампаний.
+
+    from_cache=true → быстрый ответ из БД (без WB API, имена из прошлой синхронизации).
+    from_cache=false (по умолчанию) → свежие данные от WB, имена сохраняются в кеш.
+    """
+    # Быстрый путь: читаем из кеша
+    if from_cache:
+        cached = await _load_cached_names(db, account_id)
+        return [
+            CampaignOut(
+                advert_id=aid,
+                name=info["name"],
+                type=info.get("type"),
+                status=info.get("status"),
+                cpm=0,
+            )
+            for aid, info in cached.items()
+        ]
+
     _, client = await _get_advert_client(account_id, current_user, db)
     try:
         campaigns = await client.list_campaigns(statuses=[9, 11])
     except Exception as e:
+        # Если WB API недоступен — отдаём кеш
+        cached = await _load_cached_names(db, account_id)
+        if cached:
+            return [
+                CampaignOut(advert_id=aid, name=info["name"], type=info.get("type"), status=info.get("status"), cpm=0)
+                for aid, info in cached.items()
+            ]
         raise HTTPException(status_code=502, detail=f"WB API: {e}")
+
+    # Сохраняем свежие имена в кеш (фоново, не блокируем ответ)
+    import asyncio as _asyncio
+    _asyncio.create_task(_save_campaign_names_cache(db, account_id, campaigns))
+
     return [CampaignOut(**c) for c in campaigns]
 
 

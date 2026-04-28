@@ -277,28 +277,47 @@ class WBClient:
             resp.raise_for_status()
 
     async def get_campaign_names(self, advert_ids: list[int]) -> dict[int, str]:
-        """Реальные названия кампаний через POST /adv/v1/promotion/adverts."""
+        """Реальные названия кампаний через POST /adv/v1/promotion/adverts.
+
+        WB rate limit: ~6 req/min на advert API → задержка между батчами + retry 429.
+        Батч ≤ 50 кампаний; при 51-100 кампаниях делаем 2 запроса с паузой 11 сек.
+        """
+        import asyncio as _asyncio
+
         if not advert_ids:
             return {}
         result: dict[int, str] = {}
-        for i in range(0, len(advert_ids), 50):
-            batch = advert_ids[i : i + 50]
-            try:
-                async with httpx.AsyncClient(timeout=20.0) as client:
-                    resp = await client.post(
-                        f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
-                        headers=self._headers,
-                        json=batch,
-                    )
-                if resp.status_code == 200:
-                    for item in (resp.json() or []):
-                        if isinstance(item, dict):
-                            aid = item.get("advertId")
-                            name = item.get("name", "").strip()
-                            if aid and name:
-                                result[int(aid)] = name
-            except Exception:
-                pass
+
+        batches = [advert_ids[i: i + 50] for i in range(0, len(advert_ids), 50)]
+
+        for batch_idx, batch in enumerate(batches):
+            # Пауза между батчами: 11 сек (не первый батч), чтобы не получить 429
+            if batch_idx > 0:
+                await _asyncio.sleep(11)
+
+            for attempt in range(3):
+                try:
+                    async with httpx.AsyncClient(timeout=20.0) as client:
+                        resp = await client.post(
+                            f"{WB_ADV_BASE}/adv/v1/promotion/adverts",
+                            headers=self._headers,
+                            json=batch,
+                        )
+                    if resp.status_code == 429:
+                        wait = 12 * (attempt + 1)  # 12s, 24s, 36s
+                        await _asyncio.sleep(wait)
+                        continue
+                    if resp.status_code == 200:
+                        for item in (resp.json() or []):
+                            if isinstance(item, dict):
+                                aid = item.get("advertId")
+                                name = item.get("name", "").strip()
+                                if aid and name:
+                                    result[int(aid)] = name
+                    break
+                except Exception:
+                    break
+
         return result
 
     async def get_all_products_with_subjects(self) -> list[dict]:

@@ -1998,8 +1998,7 @@ function StrategyTab({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
-  // Форма создания
-  const [formCampaignId, setFormCampaignId] = useState<string>('')
+  // Параметры стратегии (общие для всех выбранных кампаний)
   const [formCategory, setFormCategory] = useState('universal')
   const [formCpmMin, setFormCpmMin] = useState(100)
   const [formCpmCap, setFormCpmCap] = useState(5000)
@@ -2008,46 +2007,74 @@ function StrategyTab({ accountId }: { accountId: string }) {
   const [formDryRun, setFormDryRun] = useState(true)
   const [formSaving, setFormSaving] = useState(false)
 
-  // Просмотр расписания
+  // Выбор кампаний — чекбоксы
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [search, setSearch] = useState('')
+
+  // Просмотр расписания и лога
   const [viewStrategyId, setViewStrategyId] = useState<string | null>(null)
   const [weeklySchedule, setWeeklySchedule] = useState<WeeklySchedule | null>(null)
   const [scheduleLoading, setScheduleLoading] = useState(false)
-
-  // Лог
   const [logStrategyId, setLogStrategyId] = useState<string | null>(null)
   const [logEntries, setLogEntries] = useState<BidLogEntry[]>([])
   const [logLoading, setLogLoading] = useState(false)
-
-  // Тест-ран
-  const [runResult, setRunResult] = useState<StrategyRunResult | null>(null)
   const [running, setRunning] = useState<string | null>(null)
+  const [runResults, setRunResults] = useState<Record<string, StrategyRunResult>>({})
 
   const flash = (text: string, ok = true) => {
     setMsg({ text, ok })
-    setTimeout(() => setMsg(null), 4000)
+    setTimeout(() => setMsg(null), 5000)
   }
 
   useEffect(() => {
     if (!accountId) return
     setLoading(true)
+    // from_cache=true — быстро берём имена из БД, без долгого WB API + rate limit
     Promise.all([
-      campaignsApi.list(accountId),
+      campaignsApi.list(accountId).catch(() =>
+        // фолбэк: пробуем из кеша
+        fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8100'}/campaigns?account_id=${accountId}&from_cache=true`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('mc_token')}` }
+        }).then(r => r.json()).catch(() => [] as WbCampaign[])
+      ),
       strategiesApi.list(accountId),
       strategiesApi.categories(),
     ]).then(([camps, strats, cats]) => {
-      setCampaigns(camps)
+      setCampaigns(Array.isArray(camps) ? camps : [])
       setStrategies(strats)
       setCategories(cats.categories)
     }).catch(() => {}).finally(() => setLoading(false))
   }, [accountId])
 
-  const handleSave = async () => {
-    if (!formCampaignId) { flash('Выберите кампанию', false); return }
+  // Отфильтрованные кампании по поиску
+  const filteredCamps = campaigns.filter(c =>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    String(c.advert_id).includes(search)
+  )
+
+  const toggleAll = () => {
+    if (selected.size === filteredCamps.length) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(filteredCamps.map(c => c.advert_id)))
+    }
+  }
+
+  const toggleOne = (id: number) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkSave = async () => {
+    if (selected.size === 0) { flash('Выберите хотя бы одну кампанию', false); return }
     setFormSaving(true)
     try {
-      const s = await strategiesApi.createOrUpdate({
+      const res = await strategiesApi.bulkCreateOrUpdate({
         account_id: accountId,
-        campaign_id: Number(formCampaignId),
+        campaign_ids: Array.from(selected),
         category: formCategory,
         cpm_min: formCpmMin,
         cpm_cap: formCpmCap,
@@ -2059,11 +2086,11 @@ function StrategyTab({ accountId }: { accountId: string }) {
         use_history: true,
         history_min_days: 14,
       })
-      setStrategies(prev => {
-        const idx = prev.findIndex(x => x.id === s.id)
-        return idx >= 0 ? prev.map((x, i) => i === idx ? s : x) : [s, ...prev]
-      })
-      flash('✅ Стратегия сохранена')
+      // Обновляем список
+      const fresh = await strategiesApi.list(accountId)
+      setStrategies(fresh)
+      flash(`✅ Создано: ${res.created}, обновлено: ${res.updated} — итого ${res.total} стратегий`)
+      setSelected(new Set())
     } catch (e: any) {
       flash('Ошибка: ' + (e.message ?? 'неизвестная'), false)
     } finally {
@@ -2087,10 +2114,9 @@ function StrategyTab({ accountId }: { accountId: string }) {
 
   const handleRunNow = async (id: string) => {
     setRunning(id)
-    setRunResult(null)
     try {
       const r = await strategiesApi.runNow(id)
-      setRunResult(r)
+      setRunResults(prev => ({ ...prev, [id]: r }))
     } catch (e: any) {
       flash('Ошибка расчёта: ' + (e.message ?? ''), false)
     } finally {
@@ -2120,11 +2146,14 @@ function StrategyTab({ accountId }: { accountId: string }) {
     finally { setLogLoading(false) }
   }
 
+  // Кампании, у которых уже есть стратегия
+  const strategyByCampId = Object.fromEntries(strategies.map(s => [s.campaign_id, s]))
+
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Загрузка…</div>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Flash-сообщение */}
+
       {msg && (
         <div style={{
           padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
@@ -2136,87 +2165,142 @@ function StrategyTab({ accountId }: { accountId: string }) {
       {/* ── Пояснение ── */}
       <div style={{ ...card, padding: 20, background: '#eef2ff', borderColor: '#c7d2fe' }}>
         <div style={{ fontWeight: 700, fontSize: 14, color: C.primary, marginBottom: 8 }}>
-          🤖 Стратегия «2 пика» — что это?
+          🤖 Стратегия «2 пика» — автоматическое управление ставками CPM
         </div>
         <div style={{ fontSize: 13, color: '#3730a3', lineHeight: 1.7 }}>
-          Система автоматически меняет ставку CPM каждый час в зависимости от спроса:<br/>
-          <b>🔵 Пик (HIGH)</b> — ставка лидера (cpm_min × 5.5) — в часы максимального трафика<br/>
-          <b>🟡 Средний (MEDIUM)</b> — конкурентная ставка (cpm_min × 3.5) — переходные часы<br/>
-          <b>⚪ Тихо (LOW)</b> — минимальная ставка (cpm_min × 1) — ночь, провалы спроса<br/>
-          До 2 пиков в сутки. Защита: бюджет, остатки, ДРР.
+          <b>🔵 Пик</b> — ставка лидера (cpm_min × 5.5) · в часы пикового трафика &nbsp;|&nbsp;
+          <b>🟡 Средний</b> — конкурентная (× 3.5) · переходные часы &nbsp;|&nbsp;
+          <b>⚪ Тихо</b> — минимальная (× 1) · ночь<br/>
+          До 2 пиков в сутки. Защита: бюджет 80%/95%, остатки &lt; мин., ДРР &gt; порога.
         </div>
       </div>
 
-      {/* ── Форма создания стратегии ── */}
+      {/* ── Параметры стратегии ── */}
       <div style={{ ...card, padding: 24 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 18 }}>
-          Настроить стратегию для кампании
+        <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 16 }}>
+          Параметры стратегии
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-
-          <div>
-            <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Кампания</label>
-            <select
-              value={formCampaignId}
-              onChange={e => setFormCampaignId(e.target.value)}
-              style={{ ...inputStyle }}
-            >
-              <option value="">— выберите —</option>
-              {campaigns.map(c => (
-                <option key={c.advert_id} value={c.advert_id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
           <div>
             <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Категория профиля</label>
             <select value={formCategory} onChange={e => setFormCategory(e.target.value)} style={{ ...inputStyle }}>
               {categories.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
           </div>
-
           <div>
             <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>CPM мин рынка, ₽</label>
-            <input type="number" value={formCpmMin} onChange={e => setFormCpmMin(Number(e.target.value))} style={{ ...inputStyle }} />
+            <input type="number" value={formCpmMin} onChange={e => setFormCpmMin(Number(e.target.value))} style={{ ...inputStyle }} min={5} />
           </div>
-
           <div>
             <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Потолок ставки, ₽</label>
-            <input type="number" value={formCpmCap} onChange={e => setFormCpmCap(Number(e.target.value))} style={{ ...inputStyle }} />
+            <input type="number" value={formCpmCap} onChange={e => setFormCpmCap(Number(e.target.value))} style={{ ...inputStyle }} min={100} />
           </div>
-
           <div>
             <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Порог ДРР, %</label>
-            <input type="number" value={formDrr} onChange={e => setFormDrr(Number(e.target.value))} style={{ ...inputStyle }} />
+            <input type="number" value={formDrr} onChange={e => setFormDrr(Number(e.target.value))} style={{ ...inputStyle }} min={1} max={100} />
           </div>
-
           <div>
             <label style={{ fontSize: 12, color: C.textSec, display: 'block', marginBottom: 4 }}>Мин. остаток, шт</label>
-            <input type="number" value={formMinStock} onChange={e => setFormMinStock(Number(e.target.value))} style={{ ...inputStyle }} />
+            <input type="number" value={formMinStock} onChange={e => setFormMinStock(Number(e.target.value))} style={{ ...inputStyle }} min={0} />
           </div>
-
         </div>
 
-        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ marginTop: 14 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.text, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={formDryRun}
-              onChange={e => setFormDryRun(e.target.checked)}
-              style={{ width: 16, height: 16 }}
-            />
-            Тестовый режим (dry-run) — считать но не применять
+            <input type="checkbox" checked={formDryRun} onChange={e => setFormDryRun(e.target.checked)} style={{ width: 16, height: 16 }} />
+            <span><b>Тестовый режим (dry-run)</b> — рассчитывать ставки, но <b>не применять</b> их</span>
           </label>
         </div>
 
-        <div style={{ marginTop: 18 }}>
-          <button
-            onClick={handleSave}
-            disabled={formSaving}
-            style={{ ...btn(true, 'primary'), padding: '10px 28px', fontSize: 13 }}
-          >
-            {formSaving ? '⏳ Сохраняем…' : '💾 Сохранить стратегию'}
-          </button>
+        {/* Подсказка о ставках */}
+        <div style={{ marginTop: 10, padding: '8px 12px', background: '#f8fafc', borderRadius: 8, fontSize: 12, color: C.textMuted }}>
+          При cpm_min = {formCpmMin}₽ ставки будут: Пик = <b>{formCpmMin * 5.5}₽</b> · Средний = <b>{formCpmMin * 3.5}₽</b> · Тихо = <b>{formCpmMin}₽</b>
+          &nbsp;(потолок {formCpmCap}₽)
+        </div>
+      </div>
+
+      {/* ── Выбор кампаний ── */}
+      <div style={{ ...card, padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: C.text }}>
+            Выберите кампании
+          </div>
+          <div style={{ color: C.textMuted, fontSize: 13 }}>
+            {campaigns.length} кампаний · выбрано {selected.size}
+          </div>
+          <input
+            placeholder="🔍 Поиск по названию или ID"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ ...inputStyle, width: 260, padding: '6px 10px' }}
+          />
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+            <button onClick={toggleAll} style={{ ...btn(true, 'default'), padding: '6px 14px', fontSize: 12 }}>
+              {selected.size === filteredCamps.length && filteredCamps.length > 0 ? 'Снять все' : 'Выбрать все'}
+            </button>
+            <button
+              onClick={handleBulkSave}
+              disabled={formSaving || selected.size === 0}
+              style={{
+                ...btn(true, 'primary'), padding: '8px 20px', fontSize: 13,
+                opacity: selected.size === 0 ? 0.5 : 1,
+              }}
+            >
+              {formSaving
+                ? `⏳ Сохраняем ${selected.size}…`
+                : `💾 Применить к ${selected.size} кампани${selected.size === 1 ? 'и' : 'ям'}`}
+            </button>
+          </div>
+        </div>
+
+        {/* Список кампаний с чекбоксами */}
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          {filteredCamps.length === 0 ? (
+            <div style={{ padding: 24, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+              {campaigns.length === 0 ? 'Нет кампаний — сначала создайте их на вкладке «Управление»' : 'Ничего не найдено'}
+            </div>
+          ) : (
+            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+              {filteredCamps.map((c, idx) => {
+                const hasSt = !!strategyByCampId[c.advert_id]
+                const st = strategyByCampId[c.advert_id]
+                const isChecked = selected.has(c.advert_id)
+                return (
+                  <div
+                    key={c.advert_id}
+                    onClick={() => toggleOne(c.advert_id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                      background: isChecked ? C.primaryLight : idx % 2 === 0 ? C.surface : '#f9fafb',
+                      borderBottom: idx < filteredCamps.length - 1 ? `1px solid ${C.border}` : 'none',
+                      cursor: 'pointer', transition: 'background 0.1s',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleOne(c.advert_id)}
+                      onClick={e => e.stopPropagation()}
+                      style={{ width: 16, height: 16, flexShrink: 0, cursor: 'pointer' }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+                        #{c.advert_id} · {TYPE_LABEL[c.type] ?? `тип ${c.type}`}
+                      </div>
+                    </div>
+                    {hasSt && (
+                      <div style={{ fontSize: 11, color: st.dry_run ? '#d97706' : '#059669', flexShrink: 0 }}>
+                        {st.dry_run ? '🟡 dry-run' : '🟢 live'}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2224,107 +2308,78 @@ function StrategyTab({ accountId }: { accountId: string }) {
       {strategies.length > 0 && (
         <div style={{ ...card, padding: 24 }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 16 }}>
-            Активные стратегии ({strategies.length})
+            Настроенные стратегии ({strategies.length})
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {strategies.map(s => {
               const camp = campaigns.find(c => c.advert_id === s.campaign_id)
               const campName = camp?.name ?? `#${s.campaign_id}`
               const isViewOpen = viewStrategyId === s.id
               const isLogOpen = logStrategyId === s.id
               const isRunning = running === s.id
+              const runResult = runResults[s.id]
 
               return (
-                <div key={s.id} style={{
-                  border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden',
-                }}>
-                  {/* Шапка стратегии */}
+                <div key={s.id} style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
                   <div style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px',
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px',
                     background: s.enabled ? C.surface : '#f8fafc',
+                    flexWrap: 'wrap',
                   }}>
                     <div style={{
-                      width: 10, height: 10, borderRadius: '50%',
+                      width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
                       background: s.enabled ? (s.dry_run ? '#f59e0b' : '#10b981') : '#94a3b8',
-                      flexShrink: 0,
                     }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ flex: 1, minWidth: 200, overflow: 'hidden' }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {campName}
                       </div>
-                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
-                        {_categoryLabel(s.category, categories)} • cap {s.cpm_cap}₽ • ДРР ≤{s.drr_threshold_pct}%
+                      <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+                        {_categoryLabel(s.category, categories)} · cap {s.cpm_cap}₽ · ДРР≤{s.drr_threshold_pct}%
                         {s.dry_run && <span style={{ color: '#d97706', marginLeft: 6 }}>🟡 dry-run</span>}
                         {!s.dry_run && s.enabled && <span style={{ color: '#059669', marginLeft: 6 }}>🟢 live</span>}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                      <button
-                        onClick={() => handleViewSchedule(s.id)}
-                        style={{ ...btn(true, 'neutral'), padding: '6px 12px', fontSize: 12 }}
-                      >
-                        {isViewOpen ? 'Скрыть' : '🗓 График'}
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+                      <button onClick={() => handleViewSchedule(s.id)} style={{ ...btn(true, 'default'), padding: '5px 10px', fontSize: 11 }}>
+                        {isViewOpen ? '▲ График' : '🗓 График'}
                       </button>
-                      <button
-                        onClick={() => handleRunNow(s.id)}
-                        disabled={isRunning}
-                        style={{ ...btn(true, 'neutral'), padding: '6px 12px', fontSize: 12 }}
-                      >
+                      <button onClick={() => handleRunNow(s.id)} disabled={isRunning} style={{ ...btn(true, 'default'), padding: '5px 10px', fontSize: 11 }}>
                         {isRunning ? '⏳' : '▶ Тест'}
                       </button>
-                      <button
-                        onClick={() => handleViewLog(s.id)}
-                        style={{ ...btn(true, 'neutral'), padding: '6px 12px', fontSize: 12 }}
-                      >
-                        {isLogOpen ? 'Скрыть лог' : '📋 Лог'}
+                      <button onClick={() => handleViewLog(s.id)} style={{ ...btn(true, 'default'), padding: '5px 10px', fontSize: 11 }}>
+                        {isLogOpen ? '▲ Лог' : '📋 Лог'}
                       </button>
-                      <button
-                        onClick={() => handleToggle(s.id)}
-                        style={{
-                          ...btn(true, s.enabled ? 'danger' : 'primary'),
-                          padding: '6px 12px', fontSize: 12,
-                        }}
-                      >
+                      <button onClick={() => handleToggle(s.id)} style={{ ...btn(true, s.enabled ? 'danger' : 'primary'), padding: '5px 10px', fontSize: 11 }}>
                         {s.enabled ? 'Выкл' : 'Вкл'}
                       </button>
-                      <button
-                        onClick={() => handleDelete(s.id)}
-                        style={{ ...btn(true, 'danger'), padding: '6px 12px', fontSize: 12 }}
-                      >
-                        🗑
-                      </button>
+                      <button onClick={() => handleDelete(s.id)} style={{ ...btn(true, 'danger'), padding: '5px 10px', fontSize: 11 }}>🗑</button>
                     </div>
                   </div>
 
                   {/* Результат теста */}
-                  {running === null && runResult && logStrategyId !== s.id && viewStrategyId !== s.id && (
-                    <div style={{ padding: '10px 18px', background: '#f0fdf4', borderTop: `1px solid ${C.border}`, fontSize: 12 }}>
-                      ▶ Последний тест: спрос <b>{runResult.demand_level}</b> → ставка <b>{runResult.cpm_target}₽</b>
+                  {runResult && !isLogOpen && !isViewOpen && (
+                    <div style={{ padding: '8px 16px', background: '#f0fdf4', borderTop: `1px solid ${C.border}`, fontSize: 12 }}>
+                      ▶ Тест: спрос <b>{runResult.demand_level}</b> → ставка <b>{runResult.cpm_target}₽</b>
                       {runResult.skip_reason && <span style={{ color: '#92400e', marginLeft: 8 }}>({runResult.skip_reason})</span>}
                     </div>
                   )}
 
-                  {/* Тепловая карта расписания */}
                   {isViewOpen && (
-                    <div style={{ padding: '16px 18px', borderTop: `1px solid ${C.border}`, background: '#fafafa' }}>
-                      {scheduleLoading ? (
-                        <div style={{ color: C.textMuted, fontSize: 13 }}>Загрузка расписания…</div>
-                      ) : weeklySchedule ? (
-                        <ScheduleHeatmap schedule={weeklySchedule} />
-                      ) : null}
+                    <div style={{ padding: '14px 16px', borderTop: `1px solid ${C.border}`, background: '#fafafa' }}>
+                      {scheduleLoading
+                        ? <div style={{ color: C.textMuted, fontSize: 13 }}>Загрузка…</div>
+                        : weeklySchedule ? <ScheduleHeatmap schedule={weeklySchedule} /> : null}
                     </div>
                   )}
 
-                  {/* Лог изменений */}
                   {isLogOpen && (
-                    <div style={{ padding: '16px 18px', borderTop: `1px solid ${C.border}`, background: '#fafafa' }}>
-                      {logLoading ? (
-                        <div style={{ color: C.textMuted, fontSize: 13 }}>Загрузка лога…</div>
-                      ) : logEntries.length === 0 ? (
-                        <div style={{ color: C.textMuted, fontSize: 13 }}>Лог пуст — стратегия ещё не запускалась</div>
-                      ) : (
-                        <BidLogTable entries={logEntries} />
-                      )}
+                    <div style={{ padding: '14px 16px', borderTop: `1px solid ${C.border}`, background: '#fafafa' }}>
+                      {logLoading
+                        ? <div style={{ color: C.textMuted, fontSize: 13 }}>Загрузка…</div>
+                        : logEntries.length === 0
+                          ? <div style={{ color: C.textMuted, fontSize: 13 }}>Лог пуст — стратегия ещё не запускалась</div>
+                          : <BidLogTable entries={logEntries} />}
                     </div>
                   )}
                 </div>
@@ -2336,7 +2391,7 @@ function StrategyTab({ accountId }: { accountId: string }) {
 
       {strategies.length === 0 && !loading && (
         <div style={{ ...card, padding: 32, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
-          Стратегий пока нет — настройте первую выше
+          Стратегий пока нет — выберите кампании и нажмите «Применить»
         </div>
       )}
     </div>

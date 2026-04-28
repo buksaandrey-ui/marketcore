@@ -542,7 +542,7 @@ export const strategiesApi = {
   list: (accountId: string): Promise<StrategyConfig[]> =>
     apiFetch<StrategyConfig[]>(`/strategies?account_id=${accountId}`),
 
-  /** Создать или обновить стратегию */
+  /** Создать или обновить стратегию для одной кампании */
   createOrUpdate: (body: {
     account_id: string
     campaign_id: number
@@ -558,6 +558,23 @@ export const strategiesApi = {
     history_min_days: number
   }): Promise<StrategyConfig> =>
     apiFetch<StrategyConfig>('/strategies/two-peaks', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** Массовое создание/обновление стратегий для нескольких кампаний */
+  bulkCreateOrUpdate: (body: {
+    account_id: string
+    campaign_ids: number[]
+    category: string
+    cpm_min: number
+    cpm_cap: number
+    drr_threshold_pct: number
+    min_stock: number
+    budget_warning_pct: number
+    budget_stop_pct: number
+    dry_run: boolean
+    use_history: boolean
+    history_min_days: number
+  }): Promise<{ created: number; updated: number; total: number }> =>
+    apiFetch('/strategies/two-peaks/bulk', { method: 'POST', body: JSON.stringify(body) }),
 
   /** Вкл/выкл стратегию */
   toggle: (id: string): Promise<StrategyConfig> =>
