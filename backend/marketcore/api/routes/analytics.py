@@ -337,21 +337,28 @@ async def get_payouts(
     date_to   = dt.strftime("%Y-%m-%d")
 
     total = 0.0
+    api_success = False
+    api_error: str | None = None
     for account in wb_accounts:
         try:
             api_key = decrypt_api_key(account.api_key_cipher)
             client = WBClient(api_key)
             payout = await client.get_payouts_sum(date_from, date_to)
             total += payout
-        except Exception:
-            pass
+            api_success = True
+        except Exception as e:
+            api_error = str(e)
 
     return {
-        "has_data": total != 0.0,
+        # has_data=True даже если сумма=0 (API ответил, просто нет закрытых расчётов)
+        "has_data": api_success,
         "payout_sum": total,
         "period_from": date_from,
         "period_to": date_to,
-        "note": "ppvz_for_pay из WB финансового отчёта = выручка − комиссия − логистика − хранение",
+        "api_error": api_error,
+        # WB закрывает финансовый отчёт еженедельно (пн–вс).
+        # Если period включает текущую незакрытую неделю — данных за неё ещё нет.
+        "note": "ppvz_for_pay из WB финотчёта. WB закрывает расчёты раз в неделю — данные за текущую неделю появятся в понедельник.",
     }
 
 

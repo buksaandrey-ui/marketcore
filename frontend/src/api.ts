@@ -239,6 +239,7 @@ export type PayoutsData = {
   payout_sum: number
   period_from: string
   period_to: string
+  api_error: string | null
   note: string
 }
 

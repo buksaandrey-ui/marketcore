@@ -66,7 +66,8 @@ async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:
             "ordered_at": _parse_dt(o.get("date", now.isoformat())),
         }
         for o in raw_orders
-        if o.get("gNumber") or o.get("srid")
+        # Исключаем отменённые заказы (isCancel=True) — они не должны влиять на выручку
+        if (o.get("gNumber") or o.get("srid")) and not o.get("isCancel")
     ]
     if not rows:
         return 0

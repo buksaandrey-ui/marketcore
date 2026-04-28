@@ -193,6 +193,14 @@ export function Dashboard() {
           📊 Показаны демо-данные. Подключи реальный аккаунт в разделе <strong>🏪 Аккаунты</strong> для отображения твоей статистики.
         </div>
       )}
+      {!isDemo && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#78350f', lineHeight: 1.6 }}>
+          <b>📐 Формулы расчёта:</b><br/>
+          <b>Оплатили покупатели</b> = <code>finishedPrice × кол-во</code> — сумма после скидки продавца <em>и</em> скидки СПП. Отменённые заказы исключены.<br/>
+          <b>Начислено WB</b> = <code>ppvz_for_pay</code> из финансового отчёта WB = Выручка − комиссия WB − логистика − хранение. Только завершённые расчёты (WB закрывает их раз в неделю, по понедельникам).<br/>
+          <span style={{ color: '#92400e' }}>⚠ Если числа расходятся с WB-кабинетом — это нормально: WB в кабинете показывает «Сумму заказов» (до СПП), а мы — «Оплачено покупателями» (после СПП).</span>
+        </div>
+      )}
 
       {/* ── KPI ──────────────────────────────────────────────── */}
       <div className="kpi-row">
@@ -211,16 +219,25 @@ export function Dashboard() {
           {isDemo && <div className="kpi-delta pos">▲ 8.1% vs вчера</div>}
         </div>
         {!isDemo && (
-          <div className="kpi-card" title="ppvz_for_pay из WB финансового отчёта = Выручка − комиссия WB − логистика − хранение. Это реальная сумма к перечислению от WB.">
+          <div className="kpi-card" title="ppvz_for_pay из WB финансового отчёта = Выручка − комиссия WB − логистика − хранение. WB закрывает расчёты раз в неделю — данные за текущую неделю появятся в понедельник.">
             <div className="kpi-top"><span className="kpi-icon">🏦</span><span className="kpi-label">Начислено WB</span></div>
             {payoutsLoading ? (
               <div className="kpi-value" style={{ fontSize: 14, color: '#9ca3af' }}>загрузка…</div>
             ) : payouts?.has_data ? (
               <div className="kpi-value">₽ {fmt(payouts.payout_sum)}</div>
+            ) : payouts && !payouts.has_data && !payouts.api_error ? (
+              <div>
+                <div className="kpi-value" style={{ fontSize: 18 }}>₽ 0</div>
+                <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 2 }}>
+                  WB закрывает отчёт по пн — данные появятся после расчёта
+                </div>
+              </div>
             ) : (
-              <div className="kpi-value" style={{ fontSize: 14, color: '#9ca3af' }}>нет данных</div>
+              <div className="kpi-value" style={{ fontSize: 13, color: '#9ca3af' }}>
+                {payouts?.api_error ? '⚠ ошибка API' : 'нет данных'}
+              </div>
             )}
-            <div className="kpi-sub">ppvz_for_pay · после всех вычетов WB ℹ</div>
+            <div className="kpi-sub">ppvz_for_pay · после комиссии WB ℹ</div>
           </div>
         )}
         {isDemo && (
