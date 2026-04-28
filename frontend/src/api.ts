@@ -538,6 +538,10 @@ export const strategiesApi = {
   categories: (): Promise<{ categories: CategoryOption[] }> =>
     apiFetch('/strategies/categories'),
 
+  /** Обновить имена кампаний из WB API и сохранить в кеш */
+  refreshNames: (accountId: string): Promise<{ updated: number; message: string }> =>
+    apiFetch(`/campaigns/names/refresh?account_id=${accountId}`, { method: 'POST' }),
+
   /** Список стратегий аккаунта */
   list: (accountId: string): Promise<StrategyConfig[]> =>
     apiFetch<StrategyConfig[]>(`/strategies?account_id=${accountId}`),

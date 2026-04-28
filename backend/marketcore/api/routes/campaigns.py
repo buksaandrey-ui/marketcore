@@ -134,47 +134,68 @@ async def _load_cached_names(
 @router.get("", response_model=list[CampaignOut])
 async def list_campaigns(
     account_id: uuid.UUID = Query(...),
-    from_cache: bool = Query(False, description="Читать из БД-кеша без вызова WB API"),
+    refresh: bool = Query(False, description="Принудительно обновить имена из WB API"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CampaignOut]:
     """Список рекламных кампаний.
 
-    from_cache=true → быстрый ответ из БД (без WB API, имена из прошлой синхронизации).
-    from_cache=false (по умолчанию) → свежие данные от WB, имена сохраняются в кеш.
+    Стратегия: кеш-first.
+    - Если в campaign_names есть данные и refresh=false → мгновенный ответ из БД (без WB API).
+    - Если кеш пустой или refresh=true → обращаемся к WB API, сохраняем результат в кеш.
+    - Если WB API недоступен и кеш непустой → отдаём кеш.
     """
-    # Быстрый путь: читаем из кеша
-    if from_cache:
+    # 1. Пробуем кеш (всегда, кроме явного refresh)
+    if not refresh:
         cached = await _load_cached_names(db, account_id)
-        return [
-            CampaignOut(
-                advert_id=aid,
-                name=info["name"],
-                type=info.get("type"),
-                status=info.get("status"),
-                cpm=0,
-            )
-            for aid, info in cached.items()
-        ]
+        if cached:
+            return [
+                CampaignOut(
+                    advert_id=aid,
+                    name=info["name"],
+                    type=info.get("type"),
+                    status=info.get("status"),
+                    cpm=0,
+                )
+                for aid, info in cached.items()
+            ]
 
+    # 2. Кеш пустой или refresh=true — идём в WB API
     _, client = await _get_advert_client(account_id, current_user, db)
     try:
         campaigns = await client.list_campaigns(statuses=[9, 11])
     except Exception as e:
-        # Если WB API недоступен — отдаём кеш
+        # WB API упал — последний шанс: кеш
         cached = await _load_cached_names(db, account_id)
         if cached:
             return [
                 CampaignOut(advert_id=aid, name=info["name"], type=info.get("type"), status=info.get("status"), cpm=0)
                 for aid, info in cached.items()
             ]
-        raise HTTPException(status_code=502, detail=f"WB API: {e}")
+        raise HTTPException(status_code=502, detail=f"WB API недоступен: {e}")
 
-    # Сохраняем свежие имена в кеш (фоново, не блокируем ответ)
-    import asyncio as _asyncio
-    _asyncio.create_task(_save_campaign_names_cache(db, account_id, campaigns))
+    # 3. Сохраняем в кеш (блокирующий вызов — чтобы следующий запрос уже нашёл кеш)
+    await _save_campaign_names_cache(db, account_id, campaigns)
 
     return [CampaignOut(**c) for c in campaigns]
+
+
+@router.post("/names/refresh", status_code=200)
+async def refresh_campaign_names(
+    account_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Принудительно обновить имена кампаний из WB API и сохранить в кеш.
+    Используется кнопкой «Обновить имена» на фронтенде.
+    """
+    _, client = await _get_advert_client(account_id, current_user, db)
+    try:
+        campaigns = await client.list_campaigns(statuses=[7, 9, 11])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"WB API: {e}")
+    await _save_campaign_names_cache(db, account_id, campaigns)
+    return {"updated": len(campaigns), "message": f"Сохранено {len(campaigns)} имён кампаний"}
 
 
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)

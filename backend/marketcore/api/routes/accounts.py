@@ -107,6 +107,18 @@ async def sync_account(
                     else api_key
                 )
                 advert_client = WBClient(advert_key)
+
+                # Сначала сохраняем имена кампаний в кеш (campaign_names)
+                # — это отдельный запрос с retry, не зависит от ad_stats
+                try:
+                    from marketcore.api.routes.campaigns import _save_campaign_names_cache
+                    campaigns_list = await advert_client.list_campaigns(statuses=[7, 9, 11])
+                    await _save_campaign_names_cache(db, account_id, campaigns_list)
+                    results["campaign_names_cached"] = len(campaigns_list)
+                except Exception as cn_err:
+                    results["campaign_names_cached"] = 0
+                    results["campaign_names_error"] = str(cn_err)
+
                 ad_stats = await advert_client.get_ad_stats(date_str_from, date_str_to)
                 results["ad_stats"] = await save_ad_stats_wb(account_id_str, ad_stats)
                 results["sku_names"] = await save_sku_names(account_id_str, ad_stats)

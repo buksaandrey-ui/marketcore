@@ -2020,31 +2020,47 @@ function StrategyTab({ accountId }: { accountId: string }) {
   const [logLoading, setLogLoading] = useState(false)
   const [running, setRunning] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Record<string, StrategyRunResult>>({})
+  const [refreshing, setRefreshing] = useState(false)
 
   const flash = (text: string, ok = true) => {
     setMsg({ text, ok })
     setTimeout(() => setMsg(null), 5000)
   }
 
-  useEffect(() => {
+  const loadData = useCallback(async () => {
     if (!accountId) return
     setLoading(true)
-    // from_cache=true — быстро берём имена из БД, без долгого WB API + rate limit
-    Promise.all([
-      campaignsApi.list(accountId).catch(() =>
-        // фолбэк: пробуем из кеша
-        fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8100'}/campaigns?account_id=${accountId}&from_cache=true`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('mc_token')}` }
-        }).then(r => r.json()).catch(() => [] as WbCampaign[])
-      ),
-      strategiesApi.list(accountId),
-      strategiesApi.categories(),
-    ]).then(([camps, strats, cats]) => {
+    try {
+      const [camps, strats, cats] = await Promise.all([
+        campaignsApi.list(accountId),  // кеш-first: сначала БД, потом WB API
+        strategiesApi.list(accountId),
+        strategiesApi.categories(),
+      ])
       setCampaigns(Array.isArray(camps) ? camps : [])
       setStrategies(strats)
       setCategories(cats.categories)
-    }).catch(() => {}).finally(() => setLoading(false))
+    } catch {
+      // тихая ошибка
+    } finally {
+      setLoading(false)
+    }
   }, [accountId])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  const handleRefreshNames = async () => {
+    setRefreshing(true)
+    try {
+      const res = await strategiesApi.refreshNames(accountId)
+      flash(`✅ Обновлено ${res.updated} имён кампаний. Перезагружаем список…`)
+      // Через секунду перезагружаем — теперь кеш уже заполнен
+      setTimeout(() => loadData(), 1200)
+    } catch (e: any) {
+      flash('Не удалось обновить имена: ' + (e.message ?? ''), false)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   // Отфильтрованные кампании по поиску
   const filteredCamps = campaigns.filter(c =>
@@ -2234,6 +2250,14 @@ function StrategyTab({ accountId }: { accountId: string }) {
             onChange={e => setSearch(e.target.value)}
             style={{ ...inputStyle, width: 260, padding: '6px 10px' }}
           />
+          <button
+            onClick={handleRefreshNames}
+            disabled={refreshing}
+            title="Обновить реальные имена кампаний из WB API (занимает ~15 сек)"
+            style={{ ...btn(true, 'default'), padding: '6px 12px', fontSize: 12, flexShrink: 0 }}
+          >
+            {refreshing ? '⏳ Загружаем…' : '🔄 Обновить имена'}
+          </button>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
             <button onClick={toggleAll} style={{ ...btn(true, 'default'), padding: '6px 14px', fontSize: 12 }}>
               {selected.size === filteredCamps.length && filteredCamps.length > 0 ? 'Снять все' : 'Выбрать все'}
