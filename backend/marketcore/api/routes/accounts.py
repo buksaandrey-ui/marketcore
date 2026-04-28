@@ -110,10 +110,14 @@ async def sync_account(
                 ad_stats = await advert_client.get_ad_stats(date_str_from, date_str_to)
                 results["ad_stats"] = await save_ad_stats_wb(account_id_str, ad_stats)
                 results["sku_names"] = await save_sku_names(account_id_str, ad_stats)
-                results["sku_params"] = await enrich_sku_names_with_params(account_id_str)
             except Exception as ad_err:
                 results["ad_stats"] = 0
                 results["ad_stats_error"] = str(ad_err)
+            # Обогащаем граммовкой/объёмом ВСЕГДА — даже если рекламный API не ответил
+            try:
+                results["sku_params"] = await enrich_sku_names_with_params(account_id_str)
+            except Exception:
+                results["sku_params"] = 0
         else:
             from marketcore.ingestor.db import save_ad_stats_ozon, save_orders_ozon, save_prices_ozon, save_stocks_ozon
             from marketcore.ingestor.ozon_client import OzonClient
