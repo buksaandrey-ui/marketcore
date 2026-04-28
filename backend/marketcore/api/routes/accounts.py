@@ -85,13 +85,15 @@ async def sync_account(
 
     try:
         if account.marketplace == "wb":
-            from marketcore.ingestor.db import enrich_sku_names_with_params, save_ad_stats_wb, save_orders_wb, save_prices_wb, save_sku_names, save_stocks_wb
+            from marketcore.ingestor.db import enrich_sku_names_with_params, save_ad_stats_wb, save_orders_wb, save_prices_wb, save_sku_names, save_sku_names_from_stocks, save_stocks_wb
             from marketcore.ingestor.wb_client import WBClient
             client = WBClient(api_key)
             orders = await client.get_orders(date_from)
             results["orders"] = await save_orders_wb(account_id_str, orders)
             stocks = await client.get_stocks(date_from)
             results["stocks"] = await save_stocks_wb(account_id_str, stocks)
+            # Запасные имена из остатков — работают даже без рекламного API
+            results["sku_names_stocks"] = await save_sku_names_from_stocks(account_id_str, stocks)
             try:
                 prices = await client.get_prices()
                 results["prices"] = await save_prices_wb(account_id_str, prices)

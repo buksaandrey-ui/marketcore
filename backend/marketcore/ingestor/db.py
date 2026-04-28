@@ -219,6 +219,34 @@ async def save_prices_ozon(account_id: str, raw_items: list[dict]) -> int:
         return result.rowcount
 
 
+async def save_sku_names_from_stocks(account_id: str, raw_stocks: list[dict]) -> int:
+    """Запасной вариант: сохраняет имена SKU из WB Stocks API (поле name / subject).
+
+    Вызывается после save_stocks_wb. Заполняет sku_names только для тех SKU,
+    у которых ещё нет записи — не перезаписывает лучшие имена из рекламного API.
+    Поле «name» в ответе WB Stats API = название товара / категория.
+    """
+    acc_uuid = uuid.UUID(account_id)
+    now = datetime.now(timezone.utc)
+    names: dict[str, str] = {}
+    for s in raw_stocks:
+        sku = str(s.get("nmId", ""))
+        # WB Stats API: поле name = название товара, subject = категория
+        name = str(s.get("name") or s.get("subject") or "").strip()
+        if sku and name and sku not in names:
+            names[sku] = name
+    if not names:
+        return 0
+    rows = [{"account_id": acc_uuid, "sku": sku, "name": name, "updated_at": now}
+            for sku, name in names.items()]
+    async with _session_factory() as session:
+        # on_conflict_do_nothing: не перезаписываем записи из рекламного API
+        stmt = insert(SkuName).values(rows).on_conflict_do_nothing()
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount
+
+
 async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:
     now = datetime.now(timezone.utc)
     rows = []
