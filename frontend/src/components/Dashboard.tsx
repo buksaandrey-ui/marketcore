@@ -129,6 +129,11 @@ export function Dashboard() {
   const revenue     = realData?.has_data ? realData.revenue      ?? 0 : totalRevenue
   const drrO        = realData?.has_data ? realData.drr_to_orders ?? 0 : globalDrrO
   const drrR        = realData?.has_data ? realData.drr_to_revenue ?? 0 : globalDrrR
+  // ДРР к начислениям = рекламные расходы / начислено WB × 100
+  const adSpend     = realData?.has_data ? realData.ad_spend ?? 0 : 0
+  const drrP        = (adSpend > 0 && payouts?.has_data && payouts.payout_sum > 0)
+    ? adSpend / payouts.payout_sum * 100
+    : null
   const isDemo      = !realData?.has_data
 
   const handleSort = (key: SortKey) => {
@@ -261,6 +266,14 @@ export function Dashboard() {
               <span className="kpi-drr-sublabel">к выручке</span>
               <span className={`kpi-drr-val ${drrClass(drrR)}`}>{fmtPct(drrR)}</span>
               {isDemo && <span className="kpi-delta neg" style={{ fontSize: 11 }}>▲ 1.1 пп</span>}
+            </div>
+            <div className="kpi-drr-divider" />
+            <div className="kpi-drr-col">
+              <span className="kpi-drr-sublabel">к начислениям</span>
+              {drrP !== null
+                ? <span className={`kpi-drr-val ${drrClass(drrP)}`}>{fmtPct(drrP)}</span>
+                : <span className="kpi-drr-val" style={{ color: '#6b7280', fontSize: 13 }}>нет данных</span>
+              }
             </div>
           </div>
           {isDemo && (

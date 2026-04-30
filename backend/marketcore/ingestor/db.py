@@ -33,20 +33,32 @@ async def get_account_with_key(account_id: str) -> tuple[Account, str]:
 
 
 def _wb_order_price(o: dict) -> float:
-    """Выручка по одному заказу WB = finishedPrice (цена после скидки продавца + СПП).
+    """Сколько реально заплатил покупатель = finishedPrice × (1 − spp/100).
 
-    Приоритет полей из WB API:
-      finishedPrice  — итоговая цена, которую заплатил покупатель (после всех скидок + СПП)
-      priceWithDisc  — цена после скидки продавца, но до СПП
-      totalPrice     — полная цена без скидок (используется только как крайний запасной вариант)
+    WB API: finishedPrice = цена после скидки ПРОДАВЦА, но до СПП (субсидия WB).
+    СПП (скидка постоянного покупателя) — это скидка которую WB даёт покупателю
+    за свой счёт, продавец её не платит → но «оплатили покупатели» = цена минус СПП.
+
+    Приоритет полей:
+      finishedPrice × (1 − spp/100)  — основной расчёт
+      priceWithDisc × (1 − spp/100)  — запасной
+      totalPrice × (1 − discountPercent/100) × (1 − spp/100)  — крайний запасной
     """
+    spp = float(o.get("spp") or 0)
+    spp_mult = (1 - spp / 100) if spp > 0 else 1.0
+
     fp = o.get("finishedPrice")
     if fp is not None:
-        return float(fp)
+        return round(float(fp) * spp_mult, 2)
+
     pwd = o.get("priceWithDisc")
     if pwd is not None:
-        return float(pwd)
-    return float(o.get("totalPrice", 0))
+        return round(float(pwd) * spp_mult, 2)
+
+    total = float(o.get("totalPrice") or 0)
+    disc = float(o.get("discountPercent") or 0)
+    disc_mult = (1 - disc / 100) if disc > 0 else 1.0
+    return round(total * disc_mult * spp_mult, 2)
 
 
 async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:

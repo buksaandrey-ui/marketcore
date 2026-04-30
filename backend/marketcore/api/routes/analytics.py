@@ -132,11 +132,14 @@ async def get_dashboard_summary(
     sku_names = {r.sku: r.name for r in name_rows}
 
     orders_sum = float(orders_row.orders_sum)
-    # Выручка = сумма finishedPrice × quantity (price уже хранится как finishedPrice после исправления)
-    # Не умножаем на коэффициент: finishedPrice = totalPrice − скидка продавца − СПП
+    # orders_sum = сумма (finishedPrice × (1 − spp/100)) × quantity
+    # Это реальная сумма которую заплатили покупатели (с учётом СПП)
     revenue = orders_sum
     drr_to_orders = (ad_spend / orders_sum * 100) if orders_sum > 0 else 0
-    drr_to_revenue = drr_to_orders  # revenue совпадает с orders_sum
+    # drr_to_revenue = ДРР к выручке = рекламные расходы / сумма заказов покупателей
+    # (формально то же что drr_to_orders пока revenue=orders_sum,
+    #  но семантически разные метрики — revenue будет уточняться)
+    drr_to_revenue = (ad_spend / revenue * 100) if revenue > 0 else 0
 
     return {
         "has_data": True,
@@ -333,8 +336,15 @@ async def get_payouts(
         return {"has_data": False, "payout_sum": 0.0}
 
     df, dt = _period_range(period, date_from_str, date_to_str)
-    date_from = df.strftime("%Y-%m-%d")
-    date_to   = dt.strftime("%Y-%m-%d")
+    # WB закрывает финансовые отчёты еженедельно (пн–вс).
+    # Текущая незакрытая неделя всегда даёт 0 → расширяем период на 90 дней назад
+    # чтобы захватить последние закрытые расчёты.
+    now = datetime.now(timezone.utc)
+    lookback_from = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+    date_to = now.strftime("%Y-%m-%d")
+    # Для отображения периода используем запрошенные даты
+    display_from = df.strftime("%Y-%m-%d")
+    display_to   = dt.strftime("%Y-%m-%d")
 
     total = 0.0
     api_success = False
@@ -343,7 +353,7 @@ async def get_payouts(
         try:
             api_key = decrypt_api_key(account.api_key_cipher)
             client = WBClient(api_key)
-            payout = await client.get_payouts_sum(date_from, date_to)
+            payout = await client.get_payouts_sum(lookback_from, date_to)
             total += payout
             api_success = True
         except Exception as e:
@@ -353,12 +363,12 @@ async def get_payouts(
         # has_data=True даже если сумма=0 (API ответил, просто нет закрытых расчётов)
         "has_data": api_success,
         "payout_sum": total,
-        "period_from": date_from,
-        "period_to": date_to,
+        "period_from": display_from,
+        "period_to": display_to,
         "api_error": api_error,
         # WB закрывает финансовый отчёт еженедельно (пн–вс).
-        # Если period включает текущую незакрытую неделю — данных за неё ещё нет.
-        "note": "ppvz_for_pay из WB финотчёта. WB закрывает расчёты раз в неделю — данные за текущую неделю появятся в понедельник.",
+        # Мы берём данные за 90 дней назад чтобы найти все закрытые расчёты.
+        "note": "ppvz_for_pay из WB финотчёта за последние 90 дней (WB закрывает расчёты раз в неделю).",
     }
 
 
