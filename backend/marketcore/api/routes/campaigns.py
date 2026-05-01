@@ -438,12 +438,17 @@ async def get_overall_drr(
     )
     total_revenue = float(revenue_q.scalar() or 0)
 
+    # Загружаем аккаунт отдельно — он понадобится и для услуг, и для начислений
+    try:
+        account = await acc_service.get_account(db, account_id, current_user.id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+
     # 3. Доп. услуги WB из финансового отчёта (тихо падаем если нет доступа)
     service_costs = 0.0
     by_service: dict[str, float] = {}
     services_error: str | None = None
     try:
-        account = await acc_service.get_account(db, account_id, current_user.id)
         from marketcore.ingestor.wb_client import WBClient
         client = WBClient(decrypt_api_key(account.api_key_cipher))
         svc = await client.get_wb_services_costs(date_from, date_to)
@@ -453,8 +458,23 @@ async def get_overall_drr(
         services_error = str(e)
 
     total_costs = ad_spend + service_costs
+    # drr_ad — ДРР к выручке заказов (orders_sum после SPP-фикса = что заплатили покупатели)
     drr_ad    = round(ad_spend / total_revenue * 100, 2) if total_revenue > 0 else None
     drr_total = round(total_costs / total_revenue * 100, 2) if total_revenue > 0 else None
+
+    # ДРР к начислениям WB — отдельная метрика. Финотчёт закрывается еженедельно,
+    # поэтому всегда смотрим 90 дней назад (а не за выбранный days-период).
+    payout_sum: float | None = None
+    drr_to_payouts: float | None = None
+    try:
+        from marketcore.api.routes.analytics import _fetch_payouts_90d
+        ps, ok = await _fetch_payouts_90d([account])
+        if ok:
+            payout_sum = ps
+            if ps > 0:
+                drr_to_payouts = round(ad_spend / ps * 100, 2)
+    except Exception:
+        pass
 
     return {
         "period_days":    days,
@@ -462,8 +482,10 @@ async def get_overall_drr(
         "service_costs":  round(service_costs, 2),
         "total_costs":    round(total_costs, 2),
         "total_revenue":  round(total_revenue, 2),
+        "payout_sum":     round(payout_sum, 2) if payout_sum is not None else None,
         "drr_ad":         drr_ad,
         "drr_total":      drr_total,
+        "drr_to_payouts": drr_to_payouts,
         "by_service":     by_service,
         "services_error": services_error,
     }

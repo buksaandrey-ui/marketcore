@@ -167,6 +167,8 @@ export type DashboardSummary = {
   ad_spend?: number
   drr_to_orders?: number
   drr_to_revenue?: number
+  drr_to_payouts?: number | null
+  payout_sum?: number | null
   top_skus?: { sku: string; name: string; orders_count: number; revenue: number }[]
 }
 
@@ -228,6 +230,10 @@ export type SalesReport = {
   wb_services?: number
   ad_spend?: number
   amount_to_pay?: number
+  payout_sum?: number | null
+  drr_to_orders?: number
+  drr_to_revenue?: number
+  drr_to_payouts?: number | null
   real_drr?: number
   by_warehouse?: { warehouse: string; units: number; sum: number }[]
   stock_by_warehouse?: { warehouse: string; qty: number }[]

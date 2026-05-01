@@ -70,7 +70,7 @@ async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:
             "external_id": str(o.get("gNumber", o.get("srid", ""))),
             "sku": str(o.get("nmId", "")),
             "quantity": int(o.get("quantity", 1)),
-            "price": _wb_order_price(o),   # finishedPrice = totalPrice − скидка продавца − СПП
+            "price": _wb_order_price(o),   # finishedPrice × (1 − spp/100) — что заплатил покупатель
             "status": str(o.get("orderType", "unknown")),
             "warehouse": str(o.get("warehouseName", "")),
             "warehouse_district": wb_warehouse_district(o.get("warehouseName")),
@@ -86,7 +86,7 @@ async def save_orders_wb(account_id: str, raw_orders: list[dict]) -> int:
     async with _session_factory() as session:
         # TimescaleDB (гипертаблица) не поддерживает ON CONFLICT DO UPDATE.
         # Решение: удаляем заказы за тот же период, потом вставляем свежие.
-        # Это исправляет старые записи с totalPrice → finishedPrice.
+        # Это пересчитывает старые записи с обновлённой формулой цены (СПП-вычет).
         min_date = min(r["ordered_at"] for r in rows)
         await session.execute(
             delete(Order)

@@ -129,11 +129,14 @@ export function Dashboard() {
   const revenue     = realData?.has_data ? realData.revenue      ?? 0 : totalRevenue
   const drrO        = realData?.has_data ? realData.drr_to_orders ?? 0 : globalDrrO
   const drrR        = realData?.has_data ? realData.drr_to_revenue ?? 0 : globalDrrR
-  // ДРР к начислениям = рекламные расходы / начислено WB × 100
+  // ДРР к начислениям: предпочитаем значение из бэкенда (единственный источник истины),
+  // fallback — расчёт на фронте через /payouts если бэкенд не отдал.
   const adSpend     = realData?.has_data ? realData.ad_spend ?? 0 : 0
-  const drrP        = (adSpend > 0 && payouts?.has_data && payouts.payout_sum > 0)
-    ? adSpend / payouts.payout_sum * 100
-    : null
+  const drrP        = realData?.has_data && realData.drr_to_payouts != null
+    ? realData.drr_to_payouts
+    : (adSpend > 0 && payouts?.has_data && payouts.payout_sum > 0)
+      ? adSpend / payouts.payout_sum * 100
+      : null
   const isDemo      = !realData?.has_data
 
   const handleSort = (key: SortKey) => {
@@ -201,7 +204,7 @@ export function Dashboard() {
       {!isDemo && (
         <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#78350f', lineHeight: 1.6 }}>
           <b>📐 Формулы расчёта:</b><br/>
-          <b>Оплатили покупатели</b> = <code>finishedPrice × кол-во</code> — сумма после скидки продавца <em>и</em> скидки СПП. Отменённые заказы исключены.<br/>
+          <b>Оплатили покупатели</b> = <code>finishedPrice × (1 − spp/100) × кол-во</code> — финальная цена после скидки продавца и СПП. Отменённые заказы исключены.<br/>
           <b>Начислено WB</b> = <code>ppvz_for_pay</code> из финансового отчёта WB = Выручка − комиссия WB − логистика − хранение. Только завершённые расчёты (WB закрывает их раз в неделю, по понедельникам).<br/>
           <span style={{ color: '#92400e' }}>⚠ Если числа расходятся с WB-кабинетом — это нормально: WB в кабинете показывает «Сумму заказов» (до СПП), а мы — «Оплачено покупателями» (после СПП).</span>
         </div>
@@ -218,7 +221,7 @@ export function Dashboard() {
         <div className="kpi-card">
           <div className="kpi-top"><span className="kpi-icon">💳</span><span className="kpi-label">Оплатили покупатели</span></div>
           <div className="kpi-value">₽ {fmt(revenue)}</div>
-          <div className="kpi-sub" title="finishedPrice × количество = цена после скидки продавца + скидка СПП. Именно эту сумму заплатили покупатели.">
+          <div className="kpi-sub" title="finishedPrice × (1 − spp/100) × количество. Именно эту сумму заплатили покупатели после всех скидок.">
             finishedPrice · с учётом СПП ℹ
           </div>
           {isDemo && <div className="kpi-delta pos">▲ 8.1% vs вчера</div>}

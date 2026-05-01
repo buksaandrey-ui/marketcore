@@ -136,10 +136,15 @@ async def get_dashboard_summary(
     # Это реальная сумма которую заплатили покупатели (с учётом СПП)
     revenue = orders_sum
     drr_to_orders = (ad_spend / orders_sum * 100) if orders_sum > 0 else 0
-    # drr_to_revenue = ДРР к выручке = рекламные расходы / сумма заказов покупателей
-    # (формально то же что drr_to_orders пока revenue=orders_sum,
-    #  но семантически разные метрики — revenue будет уточняться)
+    # drr_to_revenue = ДРР к выручке = реклама / сумма того что заплатили покупатели
+    # Пока revenue=orders_sum (после SPP-фикса), но это семантически отдельная метрика
+    # на случай если в будущем revenue начнёт включать/исключать иные компоненты.
     drr_to_revenue = (ad_spend / revenue * 100) if revenue > 0 else 0
+
+    # ДРР к начислениям WB — единое место расчёта (за 90 дней, не зависит от UI-периода)
+    wb_accounts = [a for a in accounts if a.marketplace == "wb"]
+    payout_sum, payout_ok = await _fetch_payouts_90d(wb_accounts)
+    drr_to_payouts = (ad_spend / payout_sum * 100) if payout_sum > 0 else None
 
     return {
         "has_data": True,
@@ -150,6 +155,8 @@ async def get_dashboard_summary(
         "ad_spend": ad_spend,
         "drr_to_orders": round(drr_to_orders, 1),
         "drr_to_revenue": round(drr_to_revenue, 1),
+        "drr_to_payouts": round(drr_to_payouts, 1) if drr_to_payouts is not None else None,
+        "payout_sum": round(payout_sum, 2) if payout_ok else None,
         "top_skus": [{"sku": r.sku, "name": sku_names.get(r.sku, ""), "orders_count": r.cnt, "revenue": float(r.revenue)} for r in stock_rows],
     }
 
@@ -159,6 +166,38 @@ async def _get_user_account_ids(db: AsyncSession, user_id: uuid.UUID) -> list:
         select(Account.id).where(Account.user_id == user_id, Account.status == "active")
     )
     return [r[0] for r in res.all()]
+
+
+async def _fetch_payouts_90d(wb_accounts: list[Account]) -> tuple[float, bool]:
+    """Сумма ppvz_for_pay за последние 90 дней по всем WB-аккаунтам.
+
+    WB закрывает финансовый отчёт еженедельно (пн–вс) → текущая неделя всегда нулевая.
+    Поэтому ВСЕГДА смотрим на 90 дней назад, чтобы захватить закрытые расчёты,
+    независимо от выбранного пользователем периода.
+
+    Возвращает: (сумма, был_ли_успешный_ответ_API).
+    """
+    from marketcore.accounts.encryption import decrypt_api_key
+    from marketcore.ingestor.wb_client import WBClient
+
+    if not wb_accounts:
+        return 0.0, False
+
+    now = datetime.now(timezone.utc)
+    df = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+    dt = now.strftime("%Y-%m-%d")
+
+    total = 0.0
+    success = False
+    for account in wb_accounts:
+        try:
+            api_key = decrypt_api_key(account.api_key_cipher)
+            client = WBClient(api_key)
+            total += await client.get_payouts_sum(df, dt)
+            success = True
+        except Exception:
+            pass
+    return total, success
 
 
 def _period_range(period: str, date_from_str: str | None, date_to_str: str | None) -> tuple[datetime, datetime]:
@@ -287,12 +326,25 @@ async def sales_report(
 
     orders_sum = float(totals.orders_sum)
     units = int(totals.units)
-    # Выручка = сумма finishedPrice × quantity (уже с учётом скидки продавца + СПП)
-    # Возвраты в WB-заказах не отделены на уровне нашей БД — показываем gross revenue
+    # Выручка = сумма (finishedPrice × (1 − spp/100)) × quantity — то что заплатили покупатели.
+    # Возвраты в WB-заказах не отделены на уровне нашей БД — показываем gross revenue.
     buyout_sum = orders_sum
     wb_services = 0.0   # точные данные доступны через WB финансовый отчёт (раздел "Общий ДРР")
+
+    # Начисления WB за 90 дней (единый источник, см. _fetch_payouts_90d)
+    accounts_full = (await db.execute(
+        select(Account).where(Account.id.in_(account_ids))
+    )).scalars().all()
+    wb_accounts = [a for a in accounts_full if a.marketplace == "wb"]
+    payout_sum, payout_ok = await _fetch_payouts_90d(wb_accounts)
+
     amount_to_pay = buyout_sum - ad_spend
-    real_drr = (ad_spend / buyout_sum * 100) if buyout_sum > 0 else 0
+    drr_to_orders   = (ad_spend / orders_sum * 100) if orders_sum > 0 else 0
+    drr_to_revenue  = (ad_spend / buyout_sum * 100) if buyout_sum > 0 else 0
+    drr_to_payouts  = (ad_spend / payout_sum * 100) if payout_sum > 0 else None
+    # «Реальный ДРР» = ДРР к начислениям (что реально получит продавец на руки).
+    # Если начислений ещё нет (новый аккаунт, незакрытая неделя) — fallback на ДРР к выручке.
+    real_drr = drr_to_payouts if drr_to_payouts is not None else drr_to_revenue
 
     return {
         "has_data": True,
@@ -303,6 +355,10 @@ async def sales_report(
         "wb_services": round(wb_services, 2),
         "ad_spend": round(ad_spend, 2),
         "amount_to_pay": round(amount_to_pay, 2),
+        "payout_sum": round(payout_sum, 2) if payout_ok else None,
+        "drr_to_orders": round(drr_to_orders, 1),
+        "drr_to_revenue": round(drr_to_revenue, 1),
+        "drr_to_payouts": round(drr_to_payouts, 1) if drr_to_payouts is not None else None,
         "real_drr": round(real_drr, 1),
         "by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "units": int(r.units), "sum": float(r.sum)} for r in wh_rows],
         "stock_by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "qty": int(r.qty)} for r in stock_rows],
@@ -336,28 +392,12 @@ async def get_payouts(
         return {"has_data": False, "payout_sum": 0.0}
 
     df, dt = _period_range(period, date_from_str, date_to_str)
-    # WB закрывает финансовые отчёты еженедельно (пн–вс).
-    # Текущая незакрытая неделя всегда даёт 0 → расширяем период на 90 дней назад
-    # чтобы захватить последние закрытые расчёты.
-    now = datetime.now(timezone.utc)
-    lookback_from = (now - timedelta(days=90)).strftime("%Y-%m-%d")
-    date_to = now.strftime("%Y-%m-%d")
-    # Для отображения периода используем запрошенные даты
+    # Для отображения периода используем запрошенные даты, но данные тянем за 90 дней
+    # (см. _fetch_payouts_90d — WB закрывает финотчёт еженедельно).
     display_from = df.strftime("%Y-%m-%d")
     display_to   = dt.strftime("%Y-%m-%d")
 
-    total = 0.0
-    api_success = False
-    api_error: str | None = None
-    for account in wb_accounts:
-        try:
-            api_key = decrypt_api_key(account.api_key_cipher)
-            client = WBClient(api_key)
-            payout = await client.get_payouts_sum(lookback_from, date_to)
-            total += payout
-            api_success = True
-        except Exception as e:
-            api_error = str(e)
+    total, api_success = await _fetch_payouts_90d(wb_accounts)
 
     return {
         # has_data=True даже если сумма=0 (API ответил, просто нет закрытых расчётов)
@@ -365,7 +405,7 @@ async def get_payouts(
         "payout_sum": total,
         "period_from": display_from,
         "period_to": display_to,
-        "api_error": api_error,
+        "api_error": None if api_success else "WB Statistics API недоступен",
         # WB закрывает финансовый отчёт еженедельно (пн–вс).
         # Мы берём данные за 90 дней назад чтобы найти все закрытые расчёты.
         "note": "ppvz_for_pay из WB финотчёта за последние 90 дней (WB закрывает расчёты раз в неделю).",
