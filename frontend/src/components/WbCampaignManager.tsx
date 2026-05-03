@@ -427,13 +427,13 @@ function StatsTab({ accountId }: { accountId: string }) {
             <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ color: C.textMuted, fontSize: 11 }}>Реклама</div>
-                <div style={{ color: drrColor(overallDrr.drr_ad), fontWeight: 700, fontSize: 18 }}>
+                <div style={{ color: drrColor(overallDrr.drr_ad ?? null), fontWeight: 700, fontSize: 18 }}>
                   {overallDrr.drr_ad != null ? `${overallDrr.drr_ad}%` : '—'}
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ color: C.textMuted, fontSize: 11 }}>Общий</div>
-                <div style={{ color: drrColor(overallDrr.drr_total), fontWeight: 700, fontSize: 22 }}>
+                <div style={{ color: drrColor(overallDrr.drr_total ?? null), fontWeight: 700, fontSize: 22 }}>
                   {overallDrr.drr_total != null ? `${overallDrr.drr_total}%` : '—'}
                 </div>
               </div>
@@ -2020,7 +2020,7 @@ function StrategyTab({ accountId }: { accountId: string }) {
   const [logLoading, setLogLoading] = useState(false)
   const [running, setRunning] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Record<string, StrategyRunResult>>({})
-  const [refreshing, setRefreshing] = useState(false)
+  // refreshing удалён: имена обновляет фоновый планировщик (раз в 1ч)
 
   const flash = (text: string, ok = true) => {
     setMsg({ text, ok })
@@ -2048,19 +2048,7 @@ function StrategyTab({ accountId }: { accountId: string }) {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const handleRefreshNames = async () => {
-    setRefreshing(true)
-    try {
-      const res = await strategiesApi.refreshNames(accountId)
-      flash(`✅ Обновлено ${res.updated} имён кампаний. Перезагружаем список…`)
-      // Через секунду перезагружаем — теперь кеш уже заполнен
-      setTimeout(() => loadData(), 1200)
-    } catch (e: any) {
-      flash('Не удалось обновить имена: ' + (e.message ?? ''), false)
-    } finally {
-      setRefreshing(false)
-    }
-  }
+  // handleRefreshNames удалён: имена обновляются автоматически (scheduler 1ч)
 
   // Отфильтрованные кампании по поиску
   const filteredCamps = campaigns.filter(c =>
@@ -2250,14 +2238,7 @@ function StrategyTab({ accountId }: { accountId: string }) {
             onChange={e => setSearch(e.target.value)}
             style={{ ...inputStyle, width: 260, padding: '6px 10px' }}
           />
-          <button
-            onClick={handleRefreshNames}
-            disabled={refreshing}
-            title="Обновить реальные имена кампаний из WB API (занимает ~15 сек)"
-            style={{ ...btn(true, 'default'), padding: '6px 12px', fontSize: 12, flexShrink: 0 }}
-          >
-            {refreshing ? '⏳ Загружаем…' : '🔄 Обновить имена'}
-          </button>
+          {/* Кнопка «Обновить имена» удалена — имена обновляет фоновый планировщик раз в 1ч */}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
             <button onClick={toggleAll} style={{ ...btn(true, 'default'), padding: '6px 14px', fontSize: 12 }}>
               {selected.size === filteredCamps.length && filteredCamps.length > 0 ? 'Снять все' : 'Выбрать все'}

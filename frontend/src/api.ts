@@ -225,8 +225,8 @@ export type SalesReport = {
   has_data: boolean
   period?: { from: string; to: string }
   units?: number
-  orders_sum?: number
-  buyout_sum?: number
+  orders_sum?: number       // Σ(finishedPrice × qty) — выручка покупателей
+  // buyout_sum удалён (I-03): это тот же orders_sum, используй orders_sum
   wb_services?: number
   ad_spend?: number
   amount_to_pay?: number
@@ -322,8 +322,14 @@ export type OverallDrrData = {
   service_costs: number
   total_costs: number
   total_revenue: number
-  drr_ad: number | null
-  drr_total: number | null
+  payout_sum?: number | null
+  // Канонические имена (I-02):
+  drr_to_revenue: number | null   // ДРР только рекламы к выручке (бывший drr_ad)
+  drr_all_costs: number | null    // ДРР (реклама+услуги) к выручке (бывший drr_total)
+  drr_to_payouts?: number | null
+  // deprecated — TODO: удалить через 2 недели после обновления компонентов
+  drr_ad?: number | null
+  drr_total?: number | null
   by_service: Record<string, number>
   services_error: string | null
 }

@@ -75,88 +75,177 @@ async def sync_account(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    api_key = decrypt_api_key(account.api_key_cipher)
-    account_id_str = str(account_id)
-    date_from = datetime.now(timezone.utc) - timedelta(days=30)
     results: dict = {}
+    account_id_str = str(account_id)
+    api_key = decrypt_api_key(account.api_key_cipher)
 
-    date_str_from = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
-    date_str_to   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Инкрементальность: тянем только то что изменилось с последней синхронизации.
+    # Overlap 24ч защищает от пропуска данных при задержках WB API.
+    now = datetime.now(timezone.utc)
+    if account.last_sync_at:
+        since = account.last_sync_at - timedelta(hours=24)
+    else:
+        since = now - timedelta(days=30)
+
+    date_str_from = since.strftime("%Y-%m-%d")
+    date_str_to   = now.strftime("%Y-%m-%d")
 
     try:
         if account.marketplace == "wb":
-            from marketcore.ingestor.db import enrich_sku_names_with_params, save_ad_stats_wb, save_orders_wb, save_prices_wb, save_sku_names, save_sku_names_from_stocks, save_stocks_wb
-            from marketcore.ingestor.wb_client import WBClient
-            client = WBClient(api_key)
-            orders = await client.get_orders(date_from)
-            results["orders"] = await save_orders_wb(account_id_str, orders)
-            stocks = await client.get_stocks(date_from)
-            results["stocks"] = await save_stocks_wb(account_id_str, stocks)
-            # Запасные имена из остатков — работают даже без рекламного API
-            results["sku_names_stocks"] = await save_sku_names_from_stocks(account_id_str, stocks)
-            try:
-                prices = await client.get_prices()
-                results["prices"] = await save_prices_wb(account_id_str, prices)
-            except Exception:
-                results["prices"] = 0
-            try:
-                # Рекламная статистика требует отдельного ключа из advertise.wildberries.ru
-                advert_key = (
-                    decrypt_api_key(account.advert_api_key_cipher)
-                    if account.advert_api_key_cipher
-                    else api_key
-                )
-                advert_client = WBClient(advert_key)
-
-                # Сначала сохраняем имена кампаний в кеш (campaign_names)
-                # — это отдельный запрос с retry, не зависит от ad_stats
-                try:
-                    from marketcore.api.routes.campaigns import _save_campaign_names_cache
-                    campaigns_list = await advert_client.list_campaigns(statuses=[7, 9, 11])
-                    await _save_campaign_names_cache(db, account_id, campaigns_list)
-                    results["campaign_names_cached"] = len(campaigns_list)
-                except Exception as cn_err:
-                    results["campaign_names_cached"] = 0
-                    results["campaign_names_error"] = str(cn_err)
-
-                ad_stats = await advert_client.get_ad_stats(date_str_from, date_str_to)
-                results["ad_stats"] = await save_ad_stats_wb(account_id_str, ad_stats)
-                results["sku_names"] = await save_sku_names(account_id_str, ad_stats)
-            except Exception as ad_err:
-                results["ad_stats"] = 0
-                results["ad_stats_error"] = str(ad_err)
-            # Обогащаем граммовкой/объёмом ВСЕГДА — даже если рекламный API не ответил
-            try:
-                results["sku_params"] = await enrich_sku_names_with_params(account_id_str)
-            except Exception:
-                results["sku_params"] = 0
+            results = await _sync_wb(db, account, account_id_str, api_key, since, date_str_from, date_str_to)
         else:
-            from marketcore.ingestor.db import save_ad_stats_ozon, save_orders_ozon, save_prices_ozon, save_stocks_ozon
-            from marketcore.ingestor.ozon_client import OzonClient
-            client = OzonClient(account.seller_id, api_key)
-            orders = await client.get_orders(date_from)
-            results["orders"] = await save_orders_ozon(account_id_str, orders)
-            stocks = await client.get_stocks()
-            results["stocks"] = await save_stocks_ozon(account_id_str, stocks)
-            try:
-                prices = await client.get_prices()
-                results["prices"] = await save_prices_ozon(account_id_str, prices)
-            except Exception:
-                results["prices"] = 0
-            try:
-                ad_stats = await client.get_ad_stats(date_str_from, date_str_to)
-                results["ad_stats"] = await save_ad_stats_ozon(account_id_str, ad_stats)
-            except Exception:
-                results["ad_stats"] = 0
+            results = await _sync_ozon(account, account_id_str, api_key, since, date_str_from, date_str_to)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка API маркетплейса: {e}")
 
-    # Mark account as active after successful sync
     account.status = "active"
-    account.last_sync_at = datetime.now(timezone.utc)
+    account.last_sync_at = now
     await db.commit()
 
     return {"status": "ok", "synced": results}
+
+
+async def _sync_wb(
+    db: AsyncSession,
+    account,
+    account_id_str: str,
+    api_key: str,
+    since: datetime,
+    date_str_from: str,
+    date_str_to: str,
+) -> dict:
+    """Синхронизация WB-аккаунта: заказы, остатки, цены, реклама, имена."""
+    from marketcore.ingestor.db import (
+        enrich_sku_names_with_params, save_ad_stats_wb, save_orders_wb,
+        save_prices_wb, save_sku_names, save_sku_names_from_stocks, save_stocks_wb,
+    )
+    from marketcore.ingestor.wb_client import WBClient
+
+    results: dict = {}
+    client = WBClient(api_key)
+
+    results["orders"] = await _sync_orders(client.get_orders, save_orders_wb, account_id_str, since)
+    stocks = await _sync_stocks(client.get_stocks, save_stocks_wb, account_id_str, since)
+    results["stocks"] = stocks["count"]
+    results["sku_names_stocks"] = await _safe(save_sku_names_from_stocks, account_id_str, stocks["raw"])
+
+    results["prices"] = await _safe(
+        lambda: client.get_prices(),
+        __save=lambda p: save_prices_wb(account_id_str, p),
+    )
+
+    advert_key = (
+        decrypt_api_key(account.advert_api_key_cipher)
+        if account.advert_api_key_cipher
+        else api_key
+    )
+    advert_client = WBClient(advert_key)
+
+    results["campaign_names_cached"] = await _sync_campaign_names(db, account.id, advert_client)
+    ad_result = await _sync_ad_stats(advert_client, account_id_str, date_str_from, date_str_to)
+    results.update(ad_result)
+
+    results["sku_params"] = await _safe(enrich_sku_names_with_params, account_id_str)
+    return results
+
+
+async def _sync_ozon(
+    account,
+    account_id_str: str,
+    api_key: str,
+    since: datetime,
+    date_str_from: str,
+    date_str_to: str,
+) -> dict:
+    """Синхронизация Ozon-аккаунта."""
+    from marketcore.ingestor.db import (
+        save_ad_stats_ozon, save_orders_ozon, save_prices_ozon, save_stocks_ozon,
+    )
+    from marketcore.ingestor.ozon_client import OzonClient
+
+    results: dict = {}
+    client = OzonClient(account.seller_id, api_key)
+
+    results["orders"] = await _sync_orders(client.get_orders, save_orders_ozon, account_id_str, since)
+    stocks = await _sync_stocks(client.get_stocks, save_stocks_ozon, account_id_str, since)
+    results["stocks"] = stocks["count"]
+
+    results["prices"] = await _safe(
+        lambda: client.get_prices(),
+        __save=lambda p: save_prices_ozon(account_id_str, p),
+    )
+    ad_result = await _sync_ad_stats_generic(client, account_id_str, date_str_from, date_str_to, save_ad_stats_ozon)
+    results.update(ad_result)
+    return results
+
+
+async def _sync_orders(get_fn, save_fn, account_id_str: str, since: datetime) -> int:
+    """Тянет заказы с момента since и сохраняет в БД."""
+    try:
+        raw = await get_fn(since)
+        return await save_fn(account_id_str, raw)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[sync] orders error: %s", e)
+        return 0
+
+
+async def _sync_stocks(get_fn, save_fn, account_id_str: str, since: datetime) -> dict:
+    """Тянет остатки (снапшот) и сохраняет."""
+    try:
+        raw = await get_fn(since)
+        count = await save_fn(account_id_str, raw)
+        return {"count": count, "raw": raw}
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[sync] stocks error: %s", e)
+        return {"count": 0, "raw": []}
+
+
+async def _sync_campaign_names(db: AsyncSession, account_id: uuid.UUID, advert_client) -> int:
+    """Обновляет кэш имён кампаний в campaign_names."""
+    try:
+        from marketcore.api.routes.campaigns import _save_campaign_names_cache
+        campaigns_list = await advert_client.list_campaigns(statuses=[7, 9, 11])
+        await _save_campaign_names_cache(db, account_id, campaigns_list)
+        return len(campaigns_list)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[sync] campaign_names error: %s", e)
+        return 0
+
+
+async def _sync_ad_stats(advert_client, account_id_str: str, date_from: str, date_to: str) -> dict:
+    """Тянет рекламную статистику WB и обновляет sku_names из неё."""
+    from marketcore.ingestor.db import save_ad_stats_wb, save_sku_names
+    try:
+        ad_stats = await advert_client.get_ad_stats(date_from, date_to)
+        n_stats = await save_ad_stats_wb(account_id_str, ad_stats)
+        n_names = await save_sku_names(account_id_str, ad_stats)
+        return {"ad_stats": n_stats, "sku_names": n_names}
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[sync] ad_stats error: %s", e)
+        return {"ad_stats": 0, "ad_stats_error": str(e)}
+
+
+async def _sync_ad_stats_generic(client, account_id_str: str, date_from: str, date_to: str, save_fn) -> dict:
+    try:
+        ad_stats = await client.get_ad_stats(date_from, date_to)
+        return {"ad_stats": await save_fn(account_id_str, ad_stats)}
+    except Exception:
+        return {"ad_stats": 0}
+
+
+async def _safe(fn, *args, __save=None, **kwargs) -> int:
+    """Безопасный вызов: тянет данные через fn(*args), сохраняет через __save если задан."""
+    try:
+        data = await fn(*args, **kwargs)
+        if __save is not None:
+            return await __save(data)
+        return data if isinstance(data, int) else 0
+    except Exception:
+        return 0
 
 
 @router.get("/{account_id}/debug-ad-stats")
@@ -292,41 +381,49 @@ async def debug_wb_advert(
     return results
 
 
-@router.get("/{account_id}/campaigns")
-async def list_campaigns(
+@router.get("/{account_id}/sync-status")
+async def get_sync_status(
     account_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[dict]:
-    """Список активных рекламных кампаний аккаунта WB.
+) -> dict:
+    """Статус последней синхронизации и свежесть кэшей аккаунта."""
+    from sqlalchemy import select as _select, func as _func
+    from marketcore.models import AdStat, CampaignName, Order, SkuName, SkuStock
 
-    Дёргает WB Advert API и возвращает:
-      advert_id, name, type, cpm, subject_id, menu_id.
-    Нужно для того, чтобы пользователь мог выбрать кампанию в расписании.
-    Только для WB (Ozon будет отдельно в Неделе 3).
-    """
     try:
         account = await service.get_account(db, account_id, current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    if account.marketplace != "wb":
-        return []
+    # Последняя дата заказа в БД
+    last_order = (await db.execute(
+        _select(_func.max(Order.ordered_at)).where(Order.account_id == account_id)
+    )).scalar_one_or_none()
 
-    # Рекламный API использует отдельный ключ (если задан), иначе — основной
-    if account.advert_api_key_cipher:
-        advert_key = decrypt_api_key(account.advert_api_key_cipher)
-    else:
-        advert_key = decrypt_api_key(account.api_key_cipher)
+    # Последняя дата рекламной статистики
+    last_ad_stat = (await db.execute(
+        _select(_func.max(AdStat.stat_date)).where(AdStat.account_id == account_id)
+    )).scalar_one_or_none()
 
-    try:
-        from marketcore.ingestor.wb_client import WBClient
-        client = WBClient(advert_key)
-        # Активные (9) + приостановленные (11) — один двухшаговый вызов
-        return await client.list_campaigns(statuses=[9, 11])
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Ошибка WB Advert API при получении кампаний: {e}. "
-                   f"Убедись что добавлен рекламный API-ключ из cmp.wildberries.ru",
-        )
+    # Свежесть кэша имён кампаний
+    last_campaign_names = (await db.execute(
+        _select(_func.max(CampaignName.updated_at)).where(CampaignName.account_id == account_id)
+    )).scalar_one_or_none()
+
+    # Свежесть кэша имён SKU
+    last_sku_names = (await db.execute(
+        _select(_func.max(SkuName.updated_at)).where(SkuName.account_id == account_id)
+    )).scalar_one_or_none()
+
+    def _iso(dt) -> str | None:
+        return dt.isoformat() if dt else None
+
+    return {
+        "account_id": str(account_id),
+        "last_sync_at": _iso(account.last_sync_at),
+        "last_order_at": _iso(last_order),
+        "last_ad_stat_at": _iso(last_ad_stat),
+        "campaign_names_updated_at": _iso(last_campaign_names),
+        "sku_names_updated_at": _iso(last_sku_names),
+    }

@@ -6,12 +6,115 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from marketcore.analytics.formulas import (
+    drr_to_orders as _drr_orders,
+    drr_to_revenue as _drr_revenue,
+    drr_to_payouts as _drr_payouts,
+    real_drr as _real_drr,
+    amount_to_pay as _amount_to_pay,
+)
 from marketcore.analytics.localization import LIZone, LocalizationService
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
 from marketcore.models import Account, AdStat, Order, SkuName, SkuStock, User
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+# ─── Response-модели (документация + валидация) ───────────────────────────────
+
+class AccountBrief(BaseModel):
+    id: str
+    name: str
+    marketplace: str
+    last_sync_at: str | None
+
+
+class TopSkuItem(BaseModel):
+    sku: str
+    name: str
+    orders_count: int
+    revenue: float
+
+
+class DashboardResponse(BaseModel):
+    has_data: bool
+    accounts: list[AccountBrief] = []
+    orders_count: int | None = None
+    orders_sum: float | None = None
+    revenue: float | None = None
+    ad_spend: float | None = None
+    drr_to_orders: float | None = None
+    drr_to_revenue: float | None = None
+    drr_to_payouts: float | None = None
+    payout_sum: float | None = None
+    top_skus: list[TopSkuItem] = []
+
+
+class WarehouseRow(BaseModel):
+    warehouse: str
+    units: int
+    sum: float
+
+
+class StockRow(BaseModel):
+    warehouse: str
+    qty: int
+
+
+class SkuRow(BaseModel):
+    sku: str
+    units: int
+    orders_sum: float
+
+
+class SalesReportResponse(BaseModel):
+    has_data: bool
+    period: dict | None = None
+    units: int | None = None
+    orders_sum: float | None = None
+    wb_services: float | None = None
+    ad_spend: float | None = None
+    amount_to_pay: float | None = None
+    payout_sum: float | None = None
+    drr_to_orders: float | None = None
+    drr_to_revenue: float | None = None
+    drr_to_payouts: float | None = None
+    real_drr: float | None = None
+    by_warehouse: list[WarehouseRow] = []
+    stock_by_warehouse: list[StockRow] = []
+    by_sku: list[SkuRow] = []
+
+
+class PayoutsResponse(BaseModel):
+    has_data: bool
+    payout_sum: float
+    period_from: str
+    period_to: str
+    api_error: str | None
+    note: str
+
+
+class HeatmapResponse(BaseModel):
+    has_data: bool
+    matrix: list[list[int]]
+    max_val: int
+
+
+class SupplyForecastItem(BaseModel):
+    sku: str
+    name: str
+    stock: int
+    vel_7d: float
+    vel_14d: float
+    vel_30d: float
+    days_oos: int | None
+    status: str
+
+
+class SupplyForecastResponse(BaseModel):
+    has_data: bool
+    items: list[SupplyForecastItem] = []
 
 
 class LocalizationResponse(BaseModel):
@@ -63,7 +166,7 @@ async def refresh_localization(
     await LocalizationService(db).refresh()
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard_summary(
     days: int = Query(30),
     period: str = Query("custom"),
@@ -135,16 +238,15 @@ async def get_dashboard_summary(
     # orders_sum = сумма (finishedPrice × (1 − spp/100)) × quantity
     # Это реальная сумма которую заплатили покупатели (с учётом СПП)
     revenue = orders_sum
-    drr_to_orders = (ad_spend / orders_sum * 100) if orders_sum > 0 else 0
-    # drr_to_revenue = ДРР к выручке = реклама / сумма того что заплатили покупатели
-    # Пока revenue=orders_sum (после SPP-фикса), но это семантически отдельная метрика
-    # на случай если в будущем revenue начнёт включать/исключать иные компоненты.
-    drr_to_revenue = (ad_spend / revenue * 100) if revenue > 0 else 0
 
     # ДРР к начислениям WB — единое место расчёта (за 90 дней, не зависит от UI-периода)
     wb_accounts = [a for a in accounts if a.marketplace == "wb"]
     payout_sum, payout_ok = await _fetch_payouts_90d(wb_accounts)
-    drr_to_payouts = (ad_spend / payout_sum * 100) if payout_sum > 0 else None
+
+    # ДРР через единый модуль formulas.py
+    calc_drr_orders  = _drr_orders(ad_spend, orders_sum)
+    calc_drr_revenue = _drr_revenue(ad_spend, revenue)
+    calc_drr_payouts = _drr_payouts(ad_spend, payout_sum if payout_ok else None)
 
     return {
         "has_data": True,
@@ -153,9 +255,9 @@ async def get_dashboard_summary(
         "orders_sum": orders_sum,
         "revenue": revenue,
         "ad_spend": ad_spend,
-        "drr_to_orders": round(drr_to_orders, 1),
-        "drr_to_revenue": round(drr_to_revenue, 1),
-        "drr_to_payouts": round(drr_to_payouts, 1) if drr_to_payouts is not None else None,
+        "drr_to_orders":  calc_drr_orders  if calc_drr_orders  is not None else 0,
+        "drr_to_revenue": calc_drr_revenue if calc_drr_revenue is not None else 0,
+        "drr_to_payouts": calc_drr_payouts,
         "payout_sum": round(payout_sum, 2) if payout_ok else None,
         "top_skus": [{"sku": r.sku, "name": sku_names.get(r.sku, ""), "orders_count": r.cnt, "revenue": float(r.revenue)} for r in stock_rows],
     }
@@ -220,7 +322,7 @@ def _period_range(period: str, date_from_str: str | None, date_to_str: str | Non
     return today - timedelta(days=30), now
 
 
-@router.get("/orders/heatmap")
+@router.get("/orders/heatmap", response_model=HeatmapResponse)
 async def orders_heatmap(
     days: int = Query(30),
     db: AsyncSession = Depends(get_db),
@@ -251,7 +353,7 @@ async def orders_heatmap(
     return {"has_data": True, "matrix": matrix, "max_val": max_val}
 
 
-@router.get("/report")
+@router.get("/report", response_model=SalesReportResponse)
 async def sales_report(
     period: str = Query("week"),
     date_from_str: str | None = Query(None, alias="date_from"),
@@ -326,9 +428,7 @@ async def sales_report(
 
     orders_sum = float(totals.orders_sum)
     units = int(totals.units)
-    # Выручка = сумма (finishedPrice × (1 − spp/100)) × quantity — то что заплатили покупатели.
-    # Возвраты в WB-заказах не отделены на уровне нашей БД — показываем gross revenue.
-    buyout_sum = orders_sum
+    # orders_sum = выручка (finishedPrice × qty, с учётом СПП)
     wb_services = 0.0   # точные данные доступны через WB финансовый отчёт (раздел "Общий ДРР")
 
     # Начисления WB за 90 дней (единый источник, см. _fetch_payouts_90d)
@@ -337,36 +437,35 @@ async def sales_report(
     )).scalars().all()
     wb_accounts = [a for a in accounts_full if a.marketplace == "wb"]
     payout_sum, payout_ok = await _fetch_payouts_90d(wb_accounts)
+    payout_for_calc = payout_sum if payout_ok else None
 
-    amount_to_pay = buyout_sum - ad_spend
-    drr_to_orders   = (ad_spend / orders_sum * 100) if orders_sum > 0 else 0
-    drr_to_revenue  = (ad_spend / buyout_sum * 100) if buyout_sum > 0 else 0
-    drr_to_payouts  = (ad_spend / payout_sum * 100) if payout_sum > 0 else None
-    # «Реальный ДРР» = ДРР к начислениям (что реально получит продавец на руки).
-    # Если начислений ещё нет (новый аккаунт, незакрытая неделя) — fallback на ДРР к выручке.
-    real_drr = drr_to_payouts if drr_to_payouts is not None else drr_to_revenue
+    # ДРР через единый модуль formulas.py — никакого inline-расчёта
+    calc_drr_orders  = _drr_orders(ad_spend, orders_sum)
+    calc_drr_revenue = _drr_revenue(ad_spend, orders_sum)
+    calc_drr_payouts = _drr_payouts(ad_spend, payout_for_calc)
+    calc_real_drr    = _real_drr(ad_spend, payout_for_calc, orders_sum)
+    calc_amount      = _amount_to_pay(orders_sum, ad_spend)
 
     return {
         "has_data": True,
         "period": {"from": df.date().isoformat(), "to": (dt - timedelta(days=1)).date().isoformat()},
         "units": units,
         "orders_sum": round(orders_sum, 2),
-        "buyout_sum": round(buyout_sum, 2),
         "wb_services": round(wb_services, 2),
         "ad_spend": round(ad_spend, 2),
-        "amount_to_pay": round(amount_to_pay, 2),
+        "amount_to_pay": round(calc_amount, 2),
         "payout_sum": round(payout_sum, 2) if payout_ok else None,
-        "drr_to_orders": round(drr_to_orders, 1),
-        "drr_to_revenue": round(drr_to_revenue, 1),
-        "drr_to_payouts": round(drr_to_payouts, 1) if drr_to_payouts is not None else None,
-        "real_drr": round(real_drr, 1),
+        "drr_to_orders":  calc_drr_orders  if calc_drr_orders  is not None else 0,
+        "drr_to_revenue": calc_drr_revenue if calc_drr_revenue is not None else 0,
+        "drr_to_payouts": calc_drr_payouts,
+        "real_drr": calc_real_drr if calc_real_drr is not None else 0,
         "by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "units": int(r.units), "sum": float(r.sum)} for r in wh_rows],
         "stock_by_warehouse": [{"warehouse": r.warehouse or "Неизвестно", "qty": int(r.qty)} for r in stock_rows],
         "by_sku": [{"sku": r.sku, "units": int(r.units), "orders_sum": float(r.orders_sum)} for r in sku_rows],
     }
 
 
-@router.get("/payouts")
+@router.get("/payouts", response_model=PayoutsResponse)
 async def get_payouts(
     period: str = Query("month"),
     date_from_str: str | None = Query(None, alias="date_from"),
@@ -412,7 +511,7 @@ async def get_payouts(
     }
 
 
-@router.get("/supply-forecast")
+@router.get("/supply-forecast", response_model=SupplyForecastResponse)
 async def get_supply_forecast(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

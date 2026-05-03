@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.accounts import service as acc_service
+from marketcore.analytics.formulas import drr as _drr, drr_all_costs as _drr_all_costs
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
 from marketcore.models import AdStat, CampaignAutoSchedule, CampaignName, Order, SkuName, SkuPrice, SkuStock, User
@@ -118,11 +119,24 @@ async def _save_campaign_names_cache(
 
 
 async def _load_cached_names(
-    db: AsyncSession, account_id: uuid.UUID
+    db: AsyncSession, account_id: uuid.UUID, check_ttl: bool = False
 ) -> dict[int, dict]:
-    """Читает имена кампаний из БД-кеша. Возвращает {advert_id: {name, type, status}}."""
+    """Читает имена кампаний из БД-кеша. Возвращает {advert_id: {name, type, status}}.
+
+    check_ttl=True → возвращает пустой dict если кэш устарел (>1ч),
+    что заставит вызывающий код пойти в WB API.
+    """
+    from marketcore.cache.policies import CAMPAIGN_NAMES_TTL, is_stale
+
     stmt = select(CampaignName).where(CampaignName.account_id == account_id)
     rows = (await db.execute(stmt)).scalars().all()
+    if not rows:
+        return {}
+    if check_ttl:
+        # Проверяем по самой старой записи: если хоть одна устарела — кэш стейл
+        oldest = min(rows, key=lambda r: r.updated_at)
+        if is_stale(oldest.updated_at, CAMPAIGN_NAMES_TTL):
+            return {}
     return {
         r.advert_id: {"name": r.name, "type": r.campaign_type, "status": r.status}
         for r in rows
@@ -145,9 +159,9 @@ async def list_campaigns(
     - Если кеш пустой или refresh=true → обращаемся к WB API, сохраняем результат в кеш.
     - Если WB API недоступен и кеш непустой → отдаём кеш.
     """
-    # 1. Пробуем кеш (всегда, кроме явного refresh)
+    # 1. Пробуем кеш (всегда, кроме явного refresh). check_ttl=True — пропускаем устаревший кэш
     if not refresh:
-        cached = await _load_cached_names(db, account_id)
+        cached = await _load_cached_names(db, account_id, check_ttl=True)
         if cached:
             return [
                 CampaignOut(
@@ -274,6 +288,24 @@ class CreateCategoryPackBody(BaseModel):
     schedule_hours: list[int]   # 24 значения 0-100
 
 
+class OverallDrrOut(BaseModel):
+    """Общий ДРР аккаунта — канонические имена полей (I-02)."""
+    period_days: int
+    ad_spend: float
+    service_costs: float
+    total_costs: float
+    total_revenue: float
+    payout_sum: float | None
+    drr_to_revenue: float | None   # ДРР только рекламы к выручке (канон, бывший drr_ad)
+    drr_all_costs: float | None    # ДРР (реклама+услуги) к выручке (канон, бывший drr_total)
+    drr_to_payouts: float | None
+    # deprecated aliases — TODO: удалить через 2 недели
+    drr_ad: float | None = None
+    drr_total: float | None = None
+    by_service: dict
+    services_error: str | None
+
+
 class CampaignStatOut(BaseModel):
     advert_id: int
     name: str
@@ -303,20 +335,31 @@ async def get_campaign_stats(
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     _, client = await _get_advert_client(account_id, current_user, db)
 
-    # Получаем список ID кампаний
-    try:
-        campaigns = await client.list_campaigns(statuses=[9, 11, 7])
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"WB API (список кампаний): {e}")
+    # Кэш-first: загружаем имена/статусы/типы из БД (без WB API)
+    cached_names = await _load_cached_names(db, account_id)
 
-    if not campaigns:
+    # ID кампаний: из кэша или из WB API (если кэш пустой)
+    if cached_names:
+        advert_ids = list(cached_names.keys())
+        status_map = {aid: info.get("status") for aid, info in cached_names.items()}
+        type_map   = {aid: info.get("type")   for aid, info in cached_names.items()}
+        name_map   = {aid: info["name"]        for aid, info in cached_names.items()}
+    else:
+        # Кэш пустой — идём в WB API и сразу сохраняем результат
+        try:
+            campaigns = await client.list_campaigns(statuses=[9, 11, 7])
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"WB API (список кампаний): {e}")
+        if not campaigns:
+            return []
+        await _save_campaign_names_cache(db, account_id, campaigns)
+        advert_ids = [c["advert_id"] for c in campaigns]
+        status_map = {c["advert_id"]: c.get("status") for c in campaigns}
+        type_map   = {c["advert_id"]: c.get("type")   for c in campaigns}
+        name_map   = {c["advert_id"]: c["name"] for c in campaigns}
+
+    if not advert_ids:
         return []
-
-    advert_ids = [c["advert_id"] for c in campaigns]
-    status_map = {c["advert_id"]: c.get("status") for c in campaigns}
-    type_map   = {c["advert_id"]: c.get("type")   for c in campaigns}
-    # Имена из list_campaigns (уже обогащены через get_campaign_names)
-    name_map   = {c["advert_id"]: c["name"] for c in campaigns}
 
     date_to   = _dt.now(_tz.utc).strftime("%Y-%m-%d")
     date_from = (_dt.now(_tz.utc) - _td(days=days)).strftime("%Y-%m-%d")
@@ -339,7 +382,7 @@ async def get_campaign_stats(
 
     result = []
     for s in stats:
-        drr = round(s["spend"] / s["revenue"] * 100, 1) if s["revenue"] > 0 else None
+        camp_drr = _drr(s["spend"], s["revenue"])   # formulas.drr — None если revenue=0
         result.append(CampaignStatOut(
             advert_id=s["advert_id"],
             # Приоритет: реальное имя кампании → имя из статистики (первый товар) → fallback
@@ -356,7 +399,7 @@ async def get_campaign_stats(
             orders=s["orders"],
             shks=s["shks"],
             revenue=round(s["revenue"], 2),
-            drr=drr,
+            drr=camp_drr,
         ))
 
     # Кампании без статистики тоже показываем (нулями)
@@ -400,7 +443,7 @@ async def bulk_set_schedule(
     return {"applied": ok_count, "total": len(body.advert_ids), "details": results}
 
 
-@router.get("/overall-drr")
+@router.get("/overall-drr", response_model=OverallDrrOut)
 async def get_overall_drr(
     account_id: uuid.UUID = Query(...),
     days: int = Query(30, ge=1, le=90),
@@ -458,36 +501,43 @@ async def get_overall_drr(
         services_error = str(e)
 
     total_costs = ad_spend + service_costs
-    # drr_ad — ДРР к выручке заказов (orders_sum после SPP-фикса = что заплатили покупатели)
-    drr_ad    = round(ad_spend / total_revenue * 100, 2) if total_revenue > 0 else None
-    drr_total = round(total_costs / total_revenue * 100, 2) if total_revenue > 0 else None
+
+    # ДРР через единый модуль formulas.py (I-04: нет inline-расчётов)
+    # drr_to_revenue — ДРР только рекламы к выручке заказов
+    # drr_all_costs  — ДРР (реклама + услуги) к выручке
+    calc_drr_to_revenue = _drr(ad_spend, total_revenue)      # канон: drr_to_revenue
+    calc_drr_all_costs  = _drr_all_costs(total_costs, total_revenue)  # канон: drr_all_costs
 
     # ДРР к начислениям WB — отдельная метрика. Финотчёт закрывается еженедельно,
     # поэтому всегда смотрим 90 дней назад (а не за выбранный days-период).
+    from marketcore.analytics.formulas import drr_to_payouts as _drr_pay
     payout_sum: float | None = None
-    drr_to_payouts: float | None = None
+    calc_drr_to_payouts: float | None = None
     try:
         from marketcore.api.routes.analytics import _fetch_payouts_90d
         ps, ok = await _fetch_payouts_90d([account])
         if ok:
             payout_sum = ps
-            if ps > 0:
-                drr_to_payouts = round(ad_spend / ps * 100, 2)
+            calc_drr_to_payouts = _drr_pay(ad_spend, ps)
     except Exception:
         pass
 
     return {
-        "period_days":    days,
-        "ad_spend":       round(ad_spend, 2),
-        "service_costs":  round(service_costs, 2),
-        "total_costs":    round(total_costs, 2),
-        "total_revenue":  round(total_revenue, 2),
-        "payout_sum":     round(payout_sum, 2) if payout_sum is not None else None,
-        "drr_ad":         drr_ad,
-        "drr_total":      drr_total,
-        "drr_to_payouts": drr_to_payouts,
-        "by_service":     by_service,
-        "services_error": services_error,
+        "period_days":     days,
+        "ad_spend":        round(ad_spend, 2),
+        "service_costs":   round(service_costs, 2),
+        "total_costs":     round(total_costs, 2),
+        "total_revenue":   round(total_revenue, 2),
+        "payout_sum":      round(payout_sum, 2) if payout_sum is not None else None,
+        # Канонические имена (I-02: drr_ad → drr_to_revenue, drr_total → drr_all_costs)
+        "drr_to_revenue":  calc_drr_to_revenue,
+        "drr_all_costs":   calc_drr_all_costs,
+        "drr_to_payouts":  calc_drr_to_payouts,
+        # deprecated aliases — убрать после обновления фронтенда
+        "drr_ad":          calc_drr_to_revenue,   # TODO: удалить через 2 недели
+        "drr_total":       calc_drr_all_costs,     # TODO: удалить через 2 недели
+        "by_service":      by_service,
+        "services_error":  services_error,
     }
 
 
@@ -499,7 +549,7 @@ async def list_skus(
 ) -> list[SkuOut]:
     """Список артикулов аккаунта из БД — для выбора при создании кампании."""
     try:
-        account = await acc_service.get_account(db, account_id, current_user.id)
+        await acc_service.get_account(db, account_id, current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -521,22 +571,19 @@ async def list_skus(
     stocks_rows = (await db.execute(stocks_q)).all()
     stock_map: dict[str, int] = {r.sku: r.stock for r in stocks_rows}
 
-    # Пытаемся получить названия из WB Content API (тихо падаем если нет доступа)
     all_skus = sorted(set(price_map) | set(stock_map))
-    name_map: dict[int, str] = {}
-    try:
-        from marketcore.ingestor.wb_client import WBClient
-        main_key = decrypt_api_key(account.api_key_cipher)
-        client = WBClient(main_key)
-        nm_ids = [int(s) for s in all_skus if s.isdigit()]
-        name_map = await client.get_nm_titles(nm_ids)
-    except Exception:
-        pass
+
+    # Кэш-first: читаем имена из sku_names (заполняется при sync)
+    sn_rows = (await db.execute(
+        select(SkuName.sku, SkuName.name)
+        .where(SkuName.account_id == account_id, SkuName.name != "")
+    )).all()
+    name_map: dict[str, str] = {r.sku: r.name for r in sn_rows}
 
     return [
         SkuOut(
             sku=s,
-            name=name_map.get(int(s)) if s.isdigit() else None,
+            name=name_map.get(s),
             price=price_map.get(s),
             stock=stock_map.get(s),
         )
