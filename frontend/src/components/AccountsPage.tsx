@@ -1,34 +1,36 @@
 import { useState, useEffect } from 'react'
 import { accountsApi, type Account } from '../api'
 
-function ConfirmModal({
-  title, message, onOk, onCancel,
-}: { title: string; message: string; onOk: () => void; onCancel: () => void }) {
+// ── Confirm dialog (MD3 Basic Dialog) ─────────────────────────────────────
+function ConfirmModal({ title, message, onOk, onCancel }: {
+  title: string; message: string; onOk: () => void; onCancel: () => void
+}) {
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+      position: 'fixed', inset: 0,
+      background: 'rgba(0,0,0,0.32)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 9999, padding: 24,
+      backdropFilter: 'blur(2px)',
     }}>
       <div style={{
-        background: '#fff', borderRadius: 12, padding: 28, maxWidth: 400,
-        width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+        background: 'var(--md-sys-color-surface-container-high)',
+        borderRadius: 'var(--md-sys-shape-corner-extra-large)',
+        padding: '24px 24px 20px',
+        maxWidth: 400, width: '100%',
+        boxShadow: 'var(--md-sys-elevation-level3)',
+        animation: 'card-in 200ms cubic-bezier(0.05,0.7,0.1,1)',
       }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: '#111827', marginBottom: 10 }}>{title}</div>
-        <div style={{ fontSize: 14, color: '#6b7280', lineHeight: 1.6, marginBottom: 24, whiteSpace: 'pre-line' }}>
+        <div style={{ fontSize: 'var(--md-sys-typescale-headline-small-size)', fontWeight: 400, color: 'var(--md-sys-color-on-surface)', marginBottom: 12 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 'var(--md-sys-typescale-body-medium-size)', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.6, marginBottom: 24, whiteSpace: 'pre-line' }}>
           {message}
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{
-            background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: 6,
-            padding: '7px 16px', cursor: 'pointer', fontSize: 14, color: '#374151',
-          }}>
-            Отмена
-          </button>
-          <button onClick={onOk} style={{
-            background: '#dc2626', border: 'none', borderRadius: 6,
-            padding: '7px 18px', cursor: 'pointer', fontSize: 14,
-            color: '#fff', fontWeight: 700,
-          }}>
+          <button className="md3-btn md3-btn-text md3-ripple" onClick={onCancel}>Отмена</button>
+          <button className="md3-btn md3-btn-error md3-ripple" onClick={onOk}>
+            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>delete</span>
             Удалить
           </button>
         </div>
@@ -37,39 +39,57 @@ function ConfirmModal({
   )
 }
 
+// ── Field wrapper ──────────────────────────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="md3-field">
+      <span className="md3-field-label">{label}</span>
+      {children}
+    </div>
+  )
+}
+
+// ── Status chip ────────────────────────────────────────────────────────────
+function StatusChip({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string; icon: string }> = {
+    pending: { label: 'Не проверен', cls: 'md3-badge-warning', icon: 'schedule' },
+    active:  { label: 'Активен',     cls: 'md3-badge-success', icon: 'check_circle' },
+    invalid: { label: 'Ошибка ключа',cls: 'md3-badge-error',   icon: 'error' },
+  }
+  const { label, cls, icon } = map[status] ?? { label: status, cls: 'md3-badge-neutral', icon: 'info' }
+  return (
+    <span className={cls} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span className="material-symbols-outlined" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>{icon}</span>
+      {label}
+    </span>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
 export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<Account[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [showForm, setShowForm] = useState(false)
-  const [syncingId, setSyncingId] = useState<string | null>(null)
-  const [syncResult, setSyncResult] = useState<string>('')
+  const [accounts, setAccounts]       = useState<Account[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
+  const [showForm, setShowForm]       = useState(false)
+  const [syncingId, setSyncingId]     = useState<string | null>(null)
+  const [syncResult, setSyncResult]   = useState<{ ok: boolean; msg: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null)
 
   const [form, setForm] = useState({
     marketplace: 'wb' as 'wb' | 'ozon',
-    name: '',
-    seller_id: '',
-    api_key: '',
-    advert_api_key: '',
+    name: '', seller_id: '', api_key: '', advert_api_key: '',
   })
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    try {
-      const data = await accountsApi.list()
-      setAccounts(data)
-    } catch {
-      setError('Не удалось загрузить аккаунты')
-    } finally {
-      setLoading(false)
-    }
+    try { setAccounts(await accountsApi.list()) }
+    catch { setError('Не удалось загрузить аккаунты') }
+    finally { setLoading(false) }
   }
 
   async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
+    e.preventDefault(); setError('')
     try {
       await accountsApi.create(form)
       setForm({ marketplace: 'wb', name: '', seller_id: '', api_key: '', advert_api_key: '' })
@@ -82,292 +102,298 @@ export default function AccountsPage() {
 
   async function handleDeleteConfirmed() {
     if (!deleteTarget) return
-    const id = deleteTarget.id
-    setDeleteTarget(null)
-    try {
-      await accountsApi.delete(id)
-      await load()
-    } catch {
-      setError('Ошибка удаления')
-    }
+    const id = deleteTarget.id; setDeleteTarget(null)
+    try { await accountsApi.delete(id); await load() }
+    catch { setError('Ошибка удаления') }
   }
 
   async function handleSync(id: string) {
-    setSyncingId(id)
-    setSyncResult('')
+    setSyncingId(id); setSyncResult(null)
     try {
       const res = await accountsApi.sync(id)
       const s = res.synced
       const parts = [
         `заказов ${s.orders ?? 0}`,
         `остатков ${s.stocks ?? 0}`,
-        ...(s.prices   != null ? [`цен ${s.prices}`]         : []),
+        ...(s.prices   != null ? [`цен ${s.prices}`]              : []),
         ...(s.ad_stats != null ? [`рекл. статистики ${s.ad_stats}`] : []),
       ]
-      setSyncResult(`✅ Синхронизировано: ${parts.join(', ')}`)
+      setSyncResult({ ok: true, msg: `Синхронизировано: ${parts.join(', ')}` })
       await load()
     } catch (err: unknown) {
-      setSyncResult(err instanceof Error ? err.message : 'Ошибка синхронизации')
-    } finally {
-      setSyncingId(null)
-    }
+      setSyncResult({ ok: false, msg: err instanceof Error ? err.message : 'Ошибка синхронизации' })
+    } finally { setSyncingId(null) }
   }
 
-  const statusLabel: Record<string, string> = {
-    pending: '⏳ Не проверен',
-    active: '✅ Активен',
-    invalid: '❌ Ошибка ключа',
-  }
-  const statusColor: Record<string, string> = {
-    pending: '#f59e0b',
-    active: '#22c55e',
-    invalid: '#ef4444',
-  }
+  // ── marketplace icon ─────────────────────────────────────────────────────
+  const mpIcon = (mp: string) => (
+    <div style={{
+      width: 36, height: 36, borderRadius: 'var(--md-sys-shape-corner-small)',
+      background: mp === 'wb' ? '#cb11ab' : '#005bff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    }}>
+      <span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 18, fontVariationSettings: "'FILL' 1" }}>
+        {mp === 'wb' ? 'storefront' : 'store'}
+      </span>
+    </div>
+  )
 
   return (
-    <div style={{ padding: '24px', maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ padding: '24px 28px', maxWidth: 840, margin: '0 auto' }}>
 
+      {/* Confirm delete dialog */}
       {deleteTarget && (
         <ConfirmModal
           title="Удалить аккаунт?"
-          message={`Аккаунт «${deleteTarget.name}» будет удалён.\nВся история синхронизации и связанные расписания останутся в системе, но управление через этот ключ станет недоступным.`}
+          message={`Аккаунт «${deleteTarget.name}» будет удалён.\nВся история синхронизации и расписания останутся в системе.`}
           onOk={handleDeleteConfirmed}
           onCancel={() => setDeleteTarget(null)}
         />
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-        <h2 style={{ color: '#111827', margin: 0, fontSize: 20, fontWeight: 700 }}>
+      {/* ── Header ──────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 12 }}>
+        <h2 style={{ margin: 0, fontSize: 'var(--md-sys-typescale-title-large-size)', fontWeight: 400, color: 'var(--md-sys-color-on-surface)' }}>
           Подключённые маркетплейсы
         </h2>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          style={{
-            background: '#6366f1', color: '#fff', border: 'none',
-            borderRadius: 8, padding: '8px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14,
-          }}
-        >
-          + Добавить аккаунт
+        <button className="md3-btn md3-btn-filled md3-ripple" onClick={() => setShowForm(!showForm)}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+          Добавить аккаунт
         </button>
       </div>
 
+      {/* ── Error banner ────────────────────────────────────────── */}
       {error && (
-        <div style={{ background: '#fef2f2', color: '#b91c1c', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14, border: '1px solid #fecaca' }}>
+        <div style={{
+          background: 'var(--md-sys-color-error-container)', color: 'var(--md-sys-color-on-error-container)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '12px 16px',
+          marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center',
+          fontSize: 'var(--md-sys-typescale-body-medium-size)',
+        }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>error</span>
           {error}
         </div>
       )}
 
+      {/* ── Sync result snackbar-like ────────────────────────────── */}
       {syncResult && (
         <div style={{
-          background: syncResult.startsWith('✅') ? '#f0fdf4' : '#fef2f2',
-          color: syncResult.startsWith('✅') ? '#166534' : '#b91c1c',
-          padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14,
-          border: `1px solid ${syncResult.startsWith('✅') ? '#bbf7d0' : '#fecaca'}`,
+          background: syncResult.ok ? 'var(--md-sys-color-success-container)' : 'var(--md-sys-color-error-container)',
+          color: syncResult.ok ? 'var(--md-sys-color-on-success-container)' : 'var(--md-sys-color-on-error-container)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '12px 16px',
+          marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center',
+          fontSize: 'var(--md-sys-typescale-body-medium-size)',
         }}>
-          {syncResult}
+          <span className="material-symbols-outlined" style={{ fontSize: 18, fontVariationSettings: "'FILL' 1" }}>
+            {syncResult.ok ? 'check_circle' : 'error'}
+          </span>
+          {syncResult.msg}
         </div>
       )}
 
+      {/* ── Add account form (MD3 outlined card) ────────────────── */}
       {showForm && (
         <form onSubmit={handleCreate} style={{
-          background: '#f8fafc', borderRadius: 12, padding: 20, marginBottom: 24,
-          border: '1px solid #e2e8f0',
+          background: 'var(--md-sys-color-surface-container)',
+          borderRadius: 'var(--md-sys-shape-corner-large)',
+          padding: 24, marginBottom: 24,
+          border: '1px solid var(--md-sys-color-outline-variant)',
+          display: 'flex', flexDirection: 'column', gap: 16,
         }}>
-          <h3 style={{ color: '#111827', margin: '0 0 16px', fontSize: 16 }}>Новый аккаунт</h3>
-
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div>
-              <label style={{ color: '#6b7280', fontSize: 12, display: 'block', marginBottom: 4 }}>МАРКЕТПЛЕЙС</label>
-              <select
-                value={form.marketplace}
-                onChange={e => setForm(f => ({ ...f, marketplace: e.target.value as 'wb' | 'ozon' }))}
-                style={{ width: '100%', background: '#fff', color: '#111827', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14 }}
-              >
-                <option value="wb">Wildberries</option>
-                <option value="ozon">Ozon</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ color: '#6b7280', fontSize: 12, display: 'block', marginBottom: 4 }}>НАЗВАНИЕ (для себя)</label>
-              <input
-                required
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Например: Мой магазин WB"
-                style={{ width: '100%', background: '#fff', color: '#111827', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box' }}
-              />
-            </div>
-
-            {form.marketplace === 'ozon' && (
-              <div>
-                <label style={{ color: '#6b7280', fontSize: 12, display: 'block', marginBottom: 4 }}>CLIENT-ID (Ozon)</label>
-                <input
-                  required
-                  value={form.seller_id}
-                  onChange={e => setForm(f => ({ ...f, seller_id: e.target.value }))}
-                  placeholder="Числовой ID продавца Ozon"
-                  style={{ width: '100%', background: '#fff', color: '#111827', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box' }}
-                />
-              </div>
-            )}
-
-            {form.marketplace === 'wb' && (
-              <input type="hidden" value={form.seller_id} onChange={e => setForm(f => ({ ...f, seller_id: e.target.value }))} />
-            )}
-
-            <div>
-              <label style={{ color: '#6b7280', fontSize: 12, display: 'block', marginBottom: 4 }}>
-                {form.marketplace === 'wb'
-                  ? 'API-КЛЮЧ СТАТИСТИКИ (seller.wildberries.ru → Профиль → Настройки → Доступ к API)'
-                  : 'API-КЛЮЧ (Личный кабинет Ozon → Настройки → Seller API)'}
-              </label>
-              <input
-                required
-                type="password"
-                value={form.api_key}
-                onChange={e => setForm(f => ({ ...f, api_key: e.target.value }))}
-                placeholder="Вставь API-ключ"
-                style={{ width: '100%', background: '#fff', color: '#111827', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box' }}
-              />
-            </div>
-
-            {form.marketplace === 'wb' && (
-              <div>
-                <label style={{ color: '#6b7280', fontSize: 12, display: 'block', marginBottom: 4 }}>
-                  API-КЛЮЧ РЕКЛАМЫ — необязательно (advertise.wildberries.ru → Профиль → Доступ к API)
-                </label>
-                <input
-                  type="password"
-                  value={form.advert_api_key}
-                  onChange={e => setForm(f => ({ ...f, advert_api_key: e.target.value }))}
-                  placeholder="Рекламный ключ из кабинета advertise.wildberries.ru"
-                  style={{ width: '100%', background: '#fff', color: '#111827', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box' }}
-                />
-                <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>
-                  Нужен только для управления ставками. Без него статистика продолжает работать.
-                </div>
-              </div>
-            )}
+          <div style={{ fontSize: 'var(--md-sys-typescale-title-medium-size)', fontWeight: 500, color: 'var(--md-sys-color-on-surface)', marginBottom: 4 }}>
+            Новый аккаунт
           </div>
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button
-              type="submit"
-              style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 20px', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
+          <Field label="МАРКЕТПЛЕЙС">
+            <select
+              className="md3-field-input"
+              value={form.marketplace}
+              onChange={e => setForm(f => ({ ...f, marketplace: e.target.value as 'wb' | 'ozon' }))}
             >
+              <option value="wb">Wildberries</option>
+              <option value="ozon">Ozon</option>
+            </select>
+          </Field>
+
+          <Field label="НАЗВАНИЕ (для себя)">
+            <input
+              required className="md3-field-input"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="Например: Мой магазин WB"
+            />
+          </Field>
+
+          {form.marketplace === 'ozon' && (
+            <Field label="CLIENT-ID (Ozon)">
+              <input
+                required className="md3-field-input"
+                value={form.seller_id}
+                onChange={e => setForm(f => ({ ...f, seller_id: e.target.value }))}
+                placeholder="Числовой ID продавца Ozon"
+              />
+            </Field>
+          )}
+
+          <Field label={form.marketplace === 'wb'
+            ? 'API-КЛЮЧ СТАТИСТИКИ (seller.wildberries.ru → Профиль → Настройки → Доступ к API)'
+            : 'API-КЛЮЧ (Личный кабинет Ozon → Настройки → Seller API)'
+          }>
+            <input
+              required type="password" className="md3-field-input"
+              value={form.api_key}
+              onChange={e => setForm(f => ({ ...f, api_key: e.target.value }))}
+              placeholder="Вставьте API-ключ"
+            />
+          </Field>
+
+          {form.marketplace === 'wb' && (
+            <Field label="API-КЛЮЧ РЕКЛАМЫ — необязательно (advertise.wildberries.ru → Профиль → Доступ к API)">
+              <input
+                type="password" className="md3-field-input"
+                value={form.advert_api_key}
+                onChange={e => setForm(f => ({ ...f, advert_api_key: e.target.value }))}
+                placeholder="Рекламный ключ из advertise.wildberries.ru"
+              />
+              <span style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>
+                Нужен только для управления ставками. Без него статистика продолжает работать.
+              </span>
+            </Field>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button type="submit" className="md3-btn md3-btn-filled md3-ripple">
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>save</span>
               Сохранить
             </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              style={{ background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 14 }}
-            >
+            <button type="button" className="md3-btn md3-btn-outlined md3-ripple" onClick={() => setShowForm(false)}>
               Отмена
             </button>
           </div>
         </form>
       )}
 
-      {loading ? (
-        <div style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>Загрузка...</div>
-      ) : accounts.length === 0 ? (
-        <div>
-          {/* Онбординг — пошаговая инструкция */}
-          <div style={{
-            background: 'linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%)',
-            borderRadius: 16, padding: '28px 32px', marginBottom: 24,
-            border: '1px solid #e0e7ff',
-          }}>
-            <div style={{ fontSize: 28, marginBottom: 12 }}>👋 Добро пожаловать!</div>
-            <div style={{ fontWeight: 700, fontSize: 18, color: '#1e1b4b', marginBottom: 8 }}>
-              Подключите аккаунт за 3 шага
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12, marginBottom: 20 }}>
-              {[
-                { step: '1', text: 'Получите API-ключ в личном кабинете WB (инструкция ниже)', color: '#6366f1' },
-                { step: '2', text: 'Нажмите «+ Добавить аккаунт» и введите ключ', color: '#8b5cf6' },
-                { step: '3', text: 'Нажмите «⟳ Синхронизировать» — данные загрузятся за 1–2 минуты', color: '#a855f7' },
-              ].map(({ step, text, color }) => (
-                <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: '50%', background: color,
-                    color: '#fff', fontWeight: 700, fontSize: 14,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>{step}</div>
-                  <div style={{ fontSize: 14, color: '#374151' }}>{text}</div>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowForm(true)}
-              style={{
-                background: '#6366f1', color: '#fff', border: 'none',
-                borderRadius: 8, padding: '10px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              }}
-            >
-              + Добавить первый аккаунт
-            </button>
-          </div>
+      {/* ── Loading state ────────────────────────────────────────── */}
+      {loading && (
+        <div className="md3-empty-state">
+          <span className="material-symbols-outlined md3-empty-icon" style={{ animation: 'spin 1s linear infinite', fontSize: 40, opacity: 0.5 }}>
+            progress_activity
+          </span>
+          <div className="md3-empty-body">Загрузка аккаунтов…</div>
         </div>
-      ) : (
-        <div style={{ display: 'grid', gap: 12 }}>
-          {/* Баннер: есть аккаунты без синхронизации */}
+      )}
+
+      {/* ── Onboarding (no accounts) ─────────────────────────────── */}
+      {!loading && accounts.length === 0 && (
+        <div style={{
+          background: 'var(--md-sys-color-primary-container)',
+          borderRadius: 'var(--md-sys-shape-corner-extra-large)',
+          padding: '32px 28px', marginBottom: 24,
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 12 }}>👋</div>
+          <div style={{ fontWeight: 500, fontSize: 18, color: 'var(--md-sys-color-on-primary-container)', marginBottom: 12 }}>
+            Подключите аккаунт за 3 шага
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+            {[
+              { step: '1', text: 'Получите API-ключ в личном кабинете WB (инструкция ниже)' },
+              { step: '2', text: 'Нажмите «Добавить аккаунт» и введите ключ' },
+              { step: '3', text: 'Нажмите «Синхронизировать» — данные загрузятся за 1–2 минуты' },
+            ].map(({ step, text }) => (
+              <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: 'var(--md-sys-color-primary)',
+                  color: 'var(--md-sys-color-on-primary)',
+                  fontWeight: 700, fontSize: 13,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                }}>{step}</div>
+                <div style={{ fontSize: 14, color: 'var(--md-sys-color-on-primary-container)' }}>{text}</div>
+              </div>
+            ))}
+          </div>
+          <button className="md3-btn md3-btn-filled md3-ripple" onClick={() => setShowForm(true)}>
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add_circle</span>
+            Добавить первый аккаунт
+          </button>
+        </div>
+      )}
+
+      {/* ── Account cards ────────────────────────────────────────── */}
+      {!loading && accounts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Sync needed banner */}
           {accounts.some(a => !a.last_sync_at) && (
             <div style={{
-              background: '#fffbeb', border: '1px solid #fcd34d',
-              borderRadius: 10, padding: '14px 18px',
-              display: 'flex', alignItems: 'center', gap: 14,
+              background: 'var(--md-sys-color-warning-container)',
+              color: 'var(--md-sys-color-on-warning-container)',
+              borderRadius: 'var(--md-sys-shape-corner-medium)',
+              padding: '14px 18px', display: 'flex', gap: 12, alignItems: 'flex-start',
             }}>
-              <span style={{ fontSize: 24 }}>📡</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, marginTop: 1, fontVariationSettings: "'FILL' 1" }}>wifi_tethering</span>
               <div>
-                <div style={{ fontWeight: 600, color: '#78350f', fontSize: 14 }}>
-                  Аккаунт добавлен — нажмите «Синхронизировать»
-                </div>
-                <div style={{ color: '#92400e', fontSize: 12, marginTop: 2 }}>
+                <div style={{ fontWeight: 500, marginBottom: 2 }}>Аккаунт добавлен — нажмите «Синхронизировать»</div>
+                <div style={{ fontSize: 13, opacity: 0.85 }}>
                   Данные загрузятся за 1–2 минуты. После этого откроется аналитика на Дашборде.
                 </div>
               </div>
             </div>
           )}
+
           {accounts.map(acc => (
             <div key={acc.id} style={{
-              background: '#fff', borderRadius: 12, padding: 20,
-              border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+              background: 'var(--md-sys-color-surface-container-low)',
+              borderRadius: 'var(--md-sys-shape-corner-large)',
+              padding: '16px 18px',
+              border: '1px solid var(--md-sys-color-outline-variant)',
+              boxShadow: 'var(--md-sys-elevation-level1)',
+              display: 'flex', alignItems: 'center', gap: 14,
+              flexWrap: 'wrap',
             }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 20 }}>{acc.marketplace === 'wb' ? '🟣' : '🔵'}</span>
-                  <span style={{ color: '#111827', fontWeight: 700, fontSize: 15 }}>{acc.name}</span>
-                  <span style={{ color: '#9ca3af', fontSize: 12 }}>{acc.marketplace.toUpperCase()}</span>
+              {/* Marketplace icon */}
+              {mpIcon(acc.marketplace)}
+
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 500, fontSize: 15, color: 'var(--md-sys-color-on-surface)' }}>
+                    {acc.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    {acc.marketplace}
+                  </span>
+                  <StatusChip status={acc.status} />
                 </div>
-                <div style={{ color: statusColor[acc.status], fontSize: 12, marginBottom: 4 }}>
-                  {statusLabel[acc.status]}
-                </div>
-                {acc.last_sync_at && (
-                  <div style={{ color: '#9ca3af', fontSize: 12 }}>
-                    Синхронизирован: {new Date(acc.last_sync_at).toLocaleString('ru')}
+                {acc.last_sync_at ? (
+                  <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 12, verticalAlign: 'middle', marginRight: 3 }}>sync</span>
+                    {new Date(acc.last_sync_at).toLocaleString('ru')}
                   </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: 'var(--md-sys-color-warning)' }}>Ещё не синхронизирован</div>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                 <button
+                  className="md3-btn md3-btn-tonal md3-ripple"
+                  style={{ padding: '6px 14px', minHeight: 36, fontSize: 13 }}
                   onClick={() => handleSync(acc.id)}
                   disabled={syncingId === acc.id}
-                  style={{
-                    background: syncingId === acc.id ? '#eff6ff' : '#eef2ff',
-                    color: '#4f46e5', border: '1px solid #a5b4fc',
-                    borderRadius: 6, padding: '6px 14px', cursor: syncingId === acc.id ? 'wait' : 'pointer', fontSize: 13,
-                  }}
                 >
-                  {syncingId === acc.id ? '⟳ Синхронизация...' : '⟳ Синхронизировать'}
+                  <span className="material-symbols-outlined" style={{ fontSize: 16, animation: syncingId === acc.id ? 'spin 1s linear infinite' : 'none' }}>
+                    sync
+                  </span>
+                  {syncingId === acc.id ? 'Синхронизация…' : 'Синхронизировать'}
                 </button>
                 <button
+                  className="md3-btn md3-btn-outlined md3-ripple"
+                  style={{ padding: '6px 12px', minHeight: 36, fontSize: 13, color: 'var(--md-sys-color-error)', borderColor: 'var(--md-sys-color-error)' }}
                   onClick={() => setDeleteTarget(acc)}
-                  style={{ background: 'transparent', color: '#ef4444', border: '1px solid #fca5a5', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}
                 >
-                  Удалить
+                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>delete</span>
                 </button>
               </div>
             </div>
@@ -375,13 +401,30 @@ export default function AccountsPage() {
         </div>
       )}
 
-      <div style={{ marginTop: 32, background: '#f8fafc', borderRadius: 12, padding: 20, border: '1px solid #e2e8f0' }}>
-        <h3 style={{ color: '#111827', margin: '0 0 12px', fontSize: 15 }}>Как получить API-ключ?</h3>
-        <div style={{ color: '#6b7280', fontSize: 13, lineHeight: 1.6 }}>
-          <p><strong style={{ color: '#111827' }}>Wildberries:</strong> seller.wildberries.ru → Профиль → Настройки → Доступ к API → Создать новый токен (выбери категории: Статистика, Цены и скидки). Для рекламы: advertise.wildberries.ru → Профиль → Доступ к API.</p>
-          <p><strong style={{ color: '#111827' }}>Ozon:</strong> Личный кабинет Ozon → Настройки → Seller API → Сгенерировать ключ. Client-ID найдёшь там же.</p>
+      {/* ── API key instructions ──────────────────────────────────── */}
+      <div style={{
+        marginTop: 32,
+        background: 'var(--md-sys-color-surface-container)',
+        borderRadius: 'var(--md-sys-shape-corner-large)',
+        padding: 20,
+        border: '1px solid var(--md-sys-color-outline-variant)',
+      }}>
+        <div style={{ fontWeight: 500, fontSize: 'var(--md-sys-typescale-title-small-size)', color: 'var(--md-sys-color-on-surface)', marginBottom: 10 }}>
+          Как получить API-ключ?
+        </div>
+        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, lineHeight: 1.7 }}>
+          <p style={{ marginBottom: 8 }}>
+            <strong style={{ color: 'var(--md-sys-color-on-surface)' }}>Wildberries:</strong>{' '}
+            seller.wildberries.ru → Профиль → Настройки → Доступ к API → Создать новый токен
+            (категории: Статистика, Цены и скидки). Для рекламы: advertise.wildberries.ru → Профиль → Доступ к API.
+          </p>
+          <p>
+            <strong style={{ color: 'var(--md-sys-color-on-surface)' }}>Ozon:</strong>{' '}
+            Личный кабинет Ozon → Настройки → Seller API → Сгенерировать ключ. Client-ID найдёте там же.
+          </p>
         </div>
       </div>
+
     </div>
   )
 }

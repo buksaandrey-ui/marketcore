@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { analyticsApi, type SalesReport } from '../api'
 
 type Period = 'today' | 'yesterday' | 'week' | 'month' | 'quarter' | 'custom'
-
 const PERIOD_LABELS: Record<Period, string> = {
   today:     'Сегодня',
   yesterday: 'Вчера',
@@ -12,12 +11,59 @@ const PERIOD_LABELS: Record<Period, string> = {
   custom:    'Свой период',
 }
 
-function fmt(n: number) {
-  return n.toLocaleString('ru', { maximumFractionDigits: 0 })
+const fmt  = (n: number) => n.toLocaleString('ru', { maximumFractionDigits: 0 })
+const fmtR = (n: number) => `₽ ${fmt(n)}`
+const drrColor = (v: number) =>
+  v < 10 ? 'var(--md-sys-color-success)' : v < 20 ? 'var(--md-sys-color-warning)' : 'var(--md-sys-color-error)'
+
+// ── Shared table card ──────────────────────────────────────────────────────
+function TableCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: 'var(--md-sys-color-surface-container-low)',
+      borderRadius: 'var(--md-sys-shape-corner-large)',
+      border: '1px solid var(--md-sys-color-outline-variant)',
+      boxShadow: 'var(--md-sys-elevation-level1)',
+      overflow: 'hidden',
+    }}>
+      <div style={{ padding: '14px 18px 10px', borderBottom: '1px solid var(--md-sys-color-outline-variant)', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--md-sys-color-primary)', fontVariationSettings: "'FILL' 1" }}>{icon}</span>
+        <span style={{ fontWeight: 500, fontSize: 'var(--md-sys-typescale-title-small-size)', color: 'var(--md-sys-color-on-surface)' }}>{title}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          {children}
+        </table>
+      </div>
+    </div>
+  )
 }
-function fmtR(n: number) {
-  return `₽ ${fmt(n)}`
-}
+
+const Th = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
+  <th style={{
+    padding: '10px 14px',
+    textAlign: right ? 'right' : 'left',
+    fontSize: 11, fontWeight: 600,
+    color: 'var(--md-sys-color-on-surface-variant)',
+    textTransform: 'uppercase', letterSpacing: '0.5px',
+    background: 'var(--md-sys-color-surface-container-high)',
+    borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+    whiteSpace: 'nowrap',
+  }}>{children}</th>
+)
+
+const Td = ({ children, right, style, colSpan }: { children: React.ReactNode; right?: boolean; style?: React.CSSProperties; colSpan?: number }) => (
+  <td colSpan={colSpan} style={{
+    padding: '10px 14px',
+    textAlign: right ? 'right' : 'left',
+    borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+    color: 'var(--md-sys-color-on-surface)',
+    verticalAlign: 'middle',
+    fontVariantNumeric: right ? 'tabular-nums' : undefined,
+    whiteSpace: right ? 'nowrap' : undefined,
+    ...style,
+  }}>{children}</td>
+)
 
 export function ReportsPage() {
   const [period, setPeriod]       = useState<Period>('week')
@@ -29,8 +75,7 @@ export function ReportsPage() {
   const [error, setError]         = useState('')
 
   function load() {
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
     analyticsApi.report({
       period,
       date_from: period === 'custom' ? dateFrom : undefined,
@@ -41,226 +86,213 @@ export function ReportsPage() {
       .catch(e => setError(e instanceof Error ? e.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }
-
   useEffect(() => { load() }, [period])
 
-  const isDemo = !data?.has_data
-
-  // Заглушка для демонстрации
-  const demo: Required<SalesReport> = {
-    has_data: false,
-    period: { from: '2025-03-16', to: '2025-03-22' },
-    units: 401,
-    orders_sum: 1537500,
-    wb_services: 76875,
-    ad_spend: 62500,
-    amount_to_pay: 1213625,
-    payout_sum: null,
-    drr_to_orders: 4.1,
-    drr_to_revenue: 4.1,
-    drr_to_payouts: null,
-    real_drr: 4.6,
-    by_warehouse: [
-      { warehouse: 'Коледино', units: 198, sum: 783000 },
-      { warehouse: 'Подольск', units: 112, sum: 430500 },
-      { warehouse: 'Электросталь', units: 91, sum: 324000 },
-    ],
-    stock_by_warehouse: [
-      { warehouse: 'Коледино', qty: 210 },
-      { warehouse: 'Подольск', qty: 98 },
-      { warehouse: 'Электросталь', qty: 43 },
-    ],
-    by_sku: [
-      { sku: '12345678', units: 214, orders_sum: 1070000 },
-      { sku: '23456789', units: 187, orders_sum: 467500 },
-    ],
-  }
-
-  const d = (isDemo ? demo : data) as Required<SalesReport>
+  const hasData = data?.has_data === true
+  const d = data as Required<SalesReport> | null
 
   return (
-    <div style={{ padding: '24px 28px 48px', maxWidth: 1200, margin: '0 auto' }}>
-      {/* Заголовок */}
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9', margin: '0 0 4px' }}>
-          📋 Отчёт по продажам
+    <div style={{ padding: '24px 28px 48px', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div>
+        <h1 style={{ margin: '0 0 4px', fontSize: 'var(--md-sys-typescale-headline-small-size)', fontWeight: 400, color: 'var(--md-sys-color-on-surface)' }}>
+          Отчёт по продажам
         </h1>
-        <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>
           Полная финансовая разбивка за выбранный период
         </p>
       </div>
 
-      {isDemo && (
-        <div style={{ background: '#1e3a5f', border: '1px solid #38bdf8', borderRadius: 10, padding: '10px 16px', marginBottom: 20, fontSize: 13, color: '#7dd3fc' }}>
-          📊 Демо-данные. Подключи аккаунт и синхронизируй данные в разделе 🏪 Аккаунты.
+      {/* ── No data banner ──────────────────────────────────────── */}
+      {!loading && !hasData && data && (
+        <div style={{
+          background: 'var(--md-sys-color-secondary-container)',
+          color: 'var(--md-sys-color-on-secondary-container)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)',
+          padding: '12px 16px', display: 'flex', gap: 10, alignItems: 'center',
+          fontSize: 13,
+        }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>info</span>
+          Нет данных за период. Подключите аккаунт и синхронизируйте в разделе <strong>Аккаунты</strong>.
         </div>
       )}
 
+      {/* ── Error ───────────────────────────────────────────────── */}
       {error && (
-        <div style={{ background: '#450a0a', color: '#fca5a5', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+        <div style={{
+          background: 'var(--md-sys-color-error-container)', color: 'var(--md-sys-color-on-error-container)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)', padding: '12px 16px',
+          display: 'flex', gap: 8, alignItems: 'center', fontSize: 13,
+        }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>error</span>
           {error}
         </div>
       )}
 
-      {/* Фильтры */}
-      <div style={{ background: '#1e293b', borderRadius: 12, padding: '16px 20px', marginBottom: 20, border: '1px solid #334155' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
-          {/* Период */}
-          <div>
-            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Период</div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {(Object.entries(PERIOD_LABELS) as [Period, string][]).map(([p, label]) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
-                    border: period === p ? '1px solid #6366f1' : '1px solid #334155',
-                    background: period === p ? '#6366f1' : '#0f172a',
-                    color: period === p ? '#fff' : '#94a3b8',
-                    fontWeight: period === p ? 700 : 400,
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+      {/* ── Filters bar ─────────────────────────────────────────── */}
+      <div style={{
+        background: 'var(--md-sys-color-surface-container)',
+        borderRadius: 'var(--md-sys-shape-corner-large)',
+        padding: '16px 20px',
+        border: '1px solid var(--md-sys-color-outline-variant)',
+        display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end',
+      }}>
+        {/* Period chips */}
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8, fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase' }}>Период</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(Object.entries(PERIOD_LABELS) as [Period, string][]).map(([p, label]) => (
+              <button key={p} className={`md3-chip md3-ripple${period === p ? ' active' : ''}`} onClick={() => setPeriod(p)}>
+                {label}
+              </button>
+            ))}
           </div>
+        </div>
 
-          {/* Свой период */}
-          {period === 'custom' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <div>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>С</div>
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                  style={{ background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13 }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>По</div>
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                  style={{ background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13 }} />
-              </div>
-              <button onClick={load} style={{ padding: '7px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
-                Применить
-              </button>
+        {/* Custom date range */}
+        {period === 'custom' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>С</div>
+              <input type="date" className="md3-field-input" style={{ padding: '7px 10px', minHeight: 36, fontSize: 13, width: 'auto' }}
+                value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
             </div>
-          )}
+            <span style={{ color: 'var(--md-sys-color-on-surface-variant)', paddingBottom: 8 }}>—</span>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>По</div>
+              <input type="date" className="md3-field-input" style={{ padding: '7px 10px', minHeight: 36, fontSize: 13, width: 'auto' }}
+                value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            </div>
+            <button className="md3-btn md3-btn-tonal md3-ripple" style={{ padding: '7px 16px', minHeight: 36 }} onClick={load}>
+              Применить
+            </button>
+          </div>
+        )}
 
-          {/* Фильтр SKU */}
-          <div style={{ marginLeft: 'auto' }}>
-            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Артикул</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input
-                value={skuFilter}
-                onChange={e => setSkuFilter(e.target.value)}
-                placeholder="Все товары"
-                style={{ background: '#0f172a', color: '#f1f5f9', border: '1px solid #334155', borderRadius: 6, padding: '6px 10px', fontSize: 13, width: 140 }}
-              />
-              <button onClick={load} style={{ padding: '6px 12px', background: '#334155', color: '#94a3b8', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>
-                ↵
-              </button>
-            </div>
+        {/* SKU filter */}
+        <div style={{ marginLeft: 'auto' }}>
+          <div style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4, fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase' }}>Артикул</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              className="md3-field-input"
+              style={{ padding: '7px 12px', minHeight: 36, fontSize: 13, width: 140 }}
+              value={skuFilter}
+              onChange={e => setSkuFilter(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && load()}
+              placeholder="Все товары"
+            />
+            <button className="md3-btn md3-btn-tonal md3-ripple" style={{ padding: '7px 12px', minHeight: 36 }} onClick={load}>
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>search</span>
+            </button>
           </div>
         </div>
       </div>
 
-      {loading ? (
-        <div style={{ color: '#64748b', textAlign: 'center', padding: 60 }}>Загрузка...</div>
-      ) : (
+      {/* ── Loading ─────────────────────────────────────────────── */}
+      {loading && (
+        <div className="md3-empty-state">
+          <span className="material-symbols-outlined md3-empty-icon" style={{ animation: 'spin 1s linear infinite', fontSize: 40, opacity: 0.5 }}>
+            progress_activity
+          </span>
+          <div className="md3-empty-body">Загрузка данных…</div>
+        </div>
+      )}
+
+      {/* ── Content ─────────────────────────────────────────────── */}
+      {!loading && hasData && d && (
         <>
-          {/* Период */}
+          {/* Period label */}
           {d.period && (
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-              Период: <b style={{ color: '#94a3b8' }}>{d.period.from}</b> — <b style={{ color: '#94a3b8' }}>{d.period.to}</b>
+            <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 14 }}>calendar_today</span>
+              Период: <strong>{d.period.from}</strong> — <strong>{d.period.to}</strong>
             </div>
           )}
 
-          {/* KPI карточки */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 20 }}>
+          {/* KPI grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
             {[
-              { label: 'Заказы (шт.)', value: fmt(d.units), color: '#38bdf8' },
-              { label: 'Выручка (с СПП)', value: fmtR(d.orders_sum), color: '#22c55e' },
-              { label: 'Реклама', value: fmtR(d.ad_spend), color: '#ec4899' },
-              { label: 'К выплате (−реклама)', value: fmtR(d.amount_to_pay), color: d.amount_to_pay >= 0 ? '#22c55e' : '#ef4444' },
-              { label: 'Реальный ДРР', value: `${d.real_drr}%`, color: d.real_drr < 15 ? '#22c55e' : d.real_drr < 25 ? '#f59e0b' : '#ef4444' },
-            ].map(card => (
-              <div key={card.label} style={{ background: '#1e293b', borderRadius: 12, padding: '14px 16px', border: '1px solid #334155' }}>
-                <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 6 }}>{card.label}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: card.color }}>{card.value}</div>
+              { label: 'Заказы', value: `${fmt(d.units)} шт`, icon: 'shopping_bag' },
+              { label: 'Выручка (с СПП)', value: fmtR(d.orders_sum), icon: 'payments' },
+              { label: 'Реклама', value: fmtR(d.ad_spend), icon: 'campaign' },
+              { label: 'К выплате', value: fmtR(d.amount_to_pay), icon: 'account_balance' },
+              { label: 'Реальный ДРР', value: `${d.real_drr}%`, icon: 'analytics', color: drrColor(d.real_drr) },
+            ].map(c => (
+              <div key={c.label} style={{
+                background: 'var(--md-sys-color-surface-container-low)',
+                borderRadius: 'var(--md-sys-shape-corner-large)',
+                padding: '16px 18px',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                boxShadow: 'var(--md-sys-elevation-level1)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 16, color: 'var(--md-sys-color-primary)', fontVariationSettings: "'FILL' 1" }}>{c.icon}</span>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--md-sys-color-on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{c.label}</span>
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 500, color: c.color ?? 'var(--md-sys-color-on-surface)', letterSpacing: '-0.25px' }}>
+                  {c.value}
+                </div>
               </div>
             ))}
           </div>
 
-          {/* Разбивка по складам */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-            <div style={{ background: '#1e293b', borderRadius: 12, padding: '16px 20px', border: '1px solid #334155' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', marginBottom: 12 }}>📦 Продажи по складам</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Склад</th>
-                    <th style={{ textAlign: 'right', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Шт.</th>
-                    <th style={{ textAlign: 'right', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Сумма</th>
+          {/* Warehouse tables */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+            <TableCard title="Продажи по складам" icon="local_shipping">
+              <thead>
+                <tr><Th>Склад</Th><Th right>Шт.</Th><Th right>Сумма</Th></tr>
+              </thead>
+              <tbody>
+                {(d.by_warehouse ?? []).map(r => (
+                  <tr key={r.warehouse}>
+                    <Td>{r.warehouse}</Td>
+                    <Td right>{fmt(r.units)}</Td>
+                    <Td right style={{ color: 'var(--md-sys-color-success)' }}>{fmtR(r.sum)}</Td>
                   </tr>
-                </thead>
-                <tbody>
-                  {(d.by_warehouse ?? []).map(r => (
-                    <tr key={r.warehouse} style={{ borderTop: '1px solid #334155' }}>
-                      <td style={{ padding: '8px 0', color: '#cbd5e1' }}>{r.warehouse}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#f1f5f9', fontWeight: 600 }}>{fmt(r.units)}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#22c55e' }}>{fmtR(r.sum)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+                {(d.by_warehouse ?? []).length === 0 && (
+                  <tr><Td colSpan={3} style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)' } as React.CSSProperties}>Нет данных</Td></tr>
+                )}
+              </tbody>
+            </TableCard>
 
-            <div style={{ background: '#1e293b', borderRadius: 12, padding: '16px 20px', border: '1px solid #334155' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', marginBottom: 12 }}>🏭 Остатки по складам</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Склад</th>
-                    <th style={{ textAlign: 'right', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Остаток</th>
+            <TableCard title="Остатки по складам" icon="inventory_2">
+              <thead>
+                <tr><Th>Склад</Th><Th right>Остаток</Th></tr>
+              </thead>
+              <tbody>
+                {(d.stock_by_warehouse ?? []).map(r => (
+                  <tr key={r.warehouse}>
+                    <Td>{r.warehouse}</Td>
+                    <Td right style={{ color: r.qty < 20 ? 'var(--md-sys-color-warning)' : 'var(--md-sys-color-on-surface)' }}>
+                      {fmt(r.qty)} {r.qty < 20 ? '⚠' : ''}
+                    </Td>
                   </tr>
-                </thead>
-                <tbody>
-                  {(d.stock_by_warehouse ?? []).map(r => (
-                    <tr key={r.warehouse} style={{ borderTop: '1px solid #334155' }}>
-                      <td style={{ padding: '8px 0', color: '#cbd5e1' }}>{r.warehouse}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: r.qty < 20 ? '#f59e0b' : '#f1f5f9', fontWeight: 600 }}>
-                        {fmt(r.qty)} {r.qty < 20 ? '⚠️' : ''}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+                {(d.stock_by_warehouse ?? []).length === 0 && (
+                  <tr><Td colSpan={2} style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)' } as React.CSSProperties}>Нет данных</Td></tr>
+                )}
+              </tbody>
+            </TableCard>
           </div>
 
-          {/* По артикулам */}
+          {/* Top SKUs */}
           {(d.by_sku ?? []).length > 0 && (
-            <div style={{ background: '#1e293b', borderRadius: 12, padding: '16px 20px', border: '1px solid #334155' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', marginBottom: 12 }}>🔖 Топ артикулов</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Артикул</th>
-                    <th style={{ textAlign: 'right', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Шт.</th>
-                    <th style={{ textAlign: 'right', color: '#64748b', fontWeight: 600, paddingBottom: 8, fontSize: 11, textTransform: 'uppercase' }}>Сумма заказов</th>
+            <TableCard title="Топ артикулов" icon="label">
+              <thead>
+                <tr><Th>Артикул</Th><Th right>Шт.</Th><Th right>Сумма заказов</Th></tr>
+              </thead>
+              <tbody>
+                {(d.by_sku ?? []).map(r => (
+                  <tr key={r.sku}>
+                    <Td style={{ fontFamily: 'monospace', color: 'var(--md-sys-color-primary)' }}>{r.sku}</Td>
+                    <Td right>{fmt(r.units)}</Td>
+                    <Td right style={{ color: 'var(--md-sys-color-success)' }}>{fmtR(r.orders_sum)}</Td>
                   </tr>
-                </thead>
-                <tbody>
-                  {(d.by_sku ?? []).map(r => (
-                    <tr key={r.sku} style={{ borderTop: '1px solid #334155' }}>
-                      <td style={{ padding: '8px 0', color: '#38bdf8', fontFamily: 'monospace' }}>{r.sku}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#f1f5f9', fontWeight: 600 }}>{fmt(r.units)}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#22c55e' }}>{fmtR(r.orders_sum)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </TableCard>
           )}
         </>
       )}

@@ -1,24 +1,26 @@
 import { useState, useEffect } from 'react'
 import { analyticsApi, type HeatmapData } from '../api'
 
-const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-const HOURS = Array.from({ length: 24 }, (_, i) => i)
-
-// makeDemoMatrix() удалён (I-01) — больше нет случайных фейковых данных
+const DAYS  = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const HOURS  = Array.from({ length: 24 }, (_, i) => i)
 const EMPTY_MATRIX = Array.from({ length: 7 }, () => Array(24).fill(0))
 
+// MD3-friendly heat colours — indigo tint → primary → error
 function heatColor(value: number, max: number): string {
-  if (max === 0 || value === 0) return '#f1f5f9'
-  const t = value / max
-  if (t < 0.25) return `rgba(34,197,94,${0.15 + t * 0.6})`
-  if (t < 0.5)  return `rgba(234,179,8,${0.3 + t * 0.5})`
-  if (t < 0.75) return `rgba(249,115,22,${0.4 + t * 0.4})`
-  return `rgba(239,68,68,${0.5 + t * 0.45})`
+  if (max === 0 || value === 0) return 'var(--md-sys-color-surface-container-highest)'
+  const t = Math.min(value / max, 1)
+  // 0 → secondary-container, 0.5 → primary-container, 1 → error-container (CSS variables)
+  // We fall back to rgba since CSS vars can't be interpolated in JS
+  const r = Math.round(103 + t * 151)   // 103→254
+  const g = Math.round(80  - t * 80)    // 80→0
+  const b = Math.round(164 - t * 164)   // 164→0
+  const a = 0.25 + t * 0.75
+  return `rgba(${r},${g},${b},${a})`
 }
 
 export function BehaviorPage() {
-  const [data, setData] = useState<HeatmapData | null>(null)
-  const [days, setDays] = useState(30)
+  const [data, setData]   = useState<HeatmapData | null>(null)
+  const [days, setDays]   = useState(30)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -34,63 +36,93 @@ export function BehaviorPage() {
   const maxVal  = hasData ? (data?.max_val ?? 0) : 0
 
   return (
-    <div style={{ padding: '24px 28px 48px', maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f1f5f9', margin: '0 0 4px' }}>
-          📈 Поведение покупателей
+    <div style={{ padding: '24px 28px 48px', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div>
+        <h1 style={{ margin: '0 0 4px', fontSize: 'var(--md-sys-typescale-headline-small-size)', fontWeight: 400, color: 'var(--md-sys-color-on-surface)' }}>
+          Поведение покупателей
         </h1>
-        <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>
           Тепловая карта заказов по дням недели и часам (московское время)
         </p>
       </div>
 
+      {/* ── No data banner ──────────────────────────────────────── */}
       {!loading && !hasData && (
-        <div style={{ background: '#1e3a5f', border: '1px solid #38bdf8', borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: 13, color: '#7dd3fc' }}>
-          📡 Нет данных за выбранный период. Подключи аккаунт и синхронизируй заказы в разделе <strong>🏪 Аккаунты</strong> — появится реальная тепловая карта.
+        <div style={{
+          background: 'var(--md-sys-color-secondary-container)',
+          color: 'var(--md-sys-color-on-secondary-container)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)',
+          padding: '12px 16px', display: 'flex', gap: 10, alignItems: 'center', fontSize: 13,
+        }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>wifi_tethering</span>
+          Нет данных за период. Подключите аккаунт и синхронизируйте заказы в разделе <strong>Аккаунты</strong>.
         </div>
       )}
 
-      {/* Период */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+      {/* ── Period chips ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 8 }}>
         {[7, 30, 90].map(d => (
           <button
             key={d}
+            className={`md3-chip md3-ripple${days === d ? ' active' : ''}`}
             onClick={() => setDays(d)}
-            style={{
-              padding: '6px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-              border: days === d ? '1px solid #6366f1' : '1px solid #334155',
-              background: days === d ? '#6366f1' : '#1e293b',
-              color: days === d ? '#fff' : '#94a3b8', fontWeight: days === d ? 700 : 400,
-            }}
           >
             {d === 7 ? 'Неделя' : d === 30 ? 'Месяц' : 'Квартал'}
           </button>
         ))}
       </div>
 
-      {loading ? (
-        <div style={{ color: '#64748b', textAlign: 'center', padding: 60 }}>Загрузка...</div>
-      ) : (
-        <div style={{ background: '#1e293b', borderRadius: 16, padding: '20px 24px', border: '1px solid #334155', overflowX: 'auto' }}>
-          <div style={{ minWidth: 700 }}>
-            {/* Шапка — часы */}
-            <div style={{ display: 'grid', gridTemplateColumns: '44px repeat(24, 1fr)', gap: 3, marginBottom: 6 }}>
+      {/* ── Loading ─────────────────────────────────────────────── */}
+      {loading && (
+        <div className="md3-empty-state">
+          <span className="material-symbols-outlined md3-empty-icon" style={{ animation: 'spin 1s linear infinite', fontSize: 40, opacity: 0.5 }}>
+            progress_activity
+          </span>
+          <div className="md3-empty-body">Загрузка…</div>
+        </div>
+      )}
+
+      {/* ── Heatmap card ────────────────────────────────────────── */}
+      {!loading && (
+        <div style={{
+          background: 'var(--md-sys-color-surface-container-low)',
+          borderRadius: 'var(--md-sys-shape-corner-large)',
+          padding: '20px 24px',
+          border: '1px solid var(--md-sys-color-outline-variant)',
+          boxShadow: 'var(--md-sys-elevation-level1)',
+          overflowX: 'auto',
+        }}>
+          <div style={{ minWidth: 680 }}>
+
+            {/* Hour headers */}
+            <div style={{ display: 'grid', gridTemplateColumns: '40px repeat(24, 1fr)', gap: 3, marginBottom: 4 }}>
               <div />
               {HOURS.map(h => (
-                <div key={h} style={{ textAlign: 'center', fontSize: 10, color: '#64748b', fontWeight: h % 6 === 0 ? 700 : 400 }}>
+                <div key={h} style={{
+                  textAlign: 'center', fontSize: 10,
+                  color: h % 6 === 0 ? 'var(--md-sys-color-on-surface)' : 'var(--md-sys-color-on-surface-variant)',
+                  fontWeight: h % 6 === 0 ? 600 : 400,
+                }}>
                   {h}
                 </div>
               ))}
             </div>
 
-            {/* Строки — дни */}
-            {DAYS.map((day, d) => (
-              <div key={d} style={{ display: 'grid', gridTemplateColumns: '44px repeat(24, 1fr)', gap: 3, marginBottom: 3 }}>
-                <div style={{ fontSize: 12, color: '#94a3b8', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+            {/* Day rows */}
+            {DAYS.map((day, di) => (
+              <div key={di} style={{ display: 'grid', gridTemplateColumns: '40px repeat(24, 1fr)', gap: 3, marginBottom: 3 }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                  display: 'flex', alignItems: 'center',
+                }}>
                   {day}
                 </div>
                 {HOURS.map(h => {
-                  const val = matrix[d]?.[h] ?? 0
+                  const val = matrix[di]?.[h] ?? 0
+                  const ratio = maxVal > 0 ? val / maxVal : 0
                   return (
                     <div
                       key={h}
@@ -99,13 +131,11 @@ export function BehaviorPage() {
                         height: 28,
                         borderRadius: 4,
                         background: heatColor(val, maxVal),
-                        cursor: val > 0 ? 'default' : undefined,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 10,
-                        color: val / maxVal > 0.5 ? '#fff' : 'transparent',
-                        fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, fontWeight: 700,
+                        color: ratio > 0.55 ? '#fff' : 'transparent',
+                        transition: 'opacity 150ms',
+                        cursor: val > 0 ? 'default' : 'default',
                       }}
                     >
                       {val > 0 ? val : ''}
@@ -115,30 +145,37 @@ export function BehaviorPage() {
               </div>
             ))}
 
-            {/* Легенда */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-              <span style={{ fontSize: 11, color: '#64748b' }}>Меньше</span>
-              {[0.1, 0.25, 0.5, 0.75, 1].map(t => (
-                <div key={t} style={{ width: 24, height: 16, borderRadius: 3, background: heatColor(Math.round(t * maxVal), maxVal) }} />
+            {/* Legend */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 14, justifyContent: 'flex-end' }}>
+              <span style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)' }}>Меньше</span>
+              {[0.1, 0.3, 0.5, 0.75, 1].map(t => (
+                <div key={t} style={{
+                  width: 22, height: 14, borderRadius: 3,
+                  background: heatColor(Math.round(t * Math.max(maxVal, 1)), Math.max(maxVal, 1)),
+                }} />
               ))}
-              <span style={{ fontSize: 11, color: '#64748b' }}>Больше</span>
+              <span style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)' }}>Больше</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Инсайты под картой — только при реальных данных */}
+      {/* ── Insights (real data only) ────────────────────────────── */}
       {!loading && hasData && (
-        <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
           {[
-            { icon: '🕙', title: 'Пик активности', desc: 'Суббота и воскресенье 12–15 часов — максимум заказов', color: '#ef4444' },
-            { icon: '📉', title: 'Мёртвые часы', desc: '0–7 утра — минимум активности, ставки можно снизить', color: '#6366f1' },
-            { icon: '🎯', title: 'Совет', desc: 'Запускай акции в пятницу вечером — покупают в выходные', color: '#22c55e' },
+            { icon: 'schedule', title: 'Пик активности', desc: 'Суббота и воскресенье 12–15 часов — максимум заказов', color: 'var(--md-sys-color-error-container)' },
+            { icon: 'bedtime',  title: 'Мёртвые часы',   desc: '0–7 утра — минимум активности, ставки можно снизить', color: 'var(--md-sys-color-secondary-container)' },
+            { icon: 'tips_and_updates', title: 'Совет',   desc: 'Запускай акции в пятницу вечером — покупают в выходные', color: 'var(--md-sys-color-primary-container)' },
           ].map(tip => (
-            <div key={tip.title} style={{ background: '#1e293b', borderRadius: 12, padding: 16, border: '1px solid #334155' }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>{tip.icon}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>{tip.title}</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>{tip.desc}</div>
+            <div key={tip.title} style={{
+              background: tip.color,
+              borderRadius: 'var(--md-sys-shape-corner-large)',
+              padding: '16px 18px',
+            }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 24, marginBottom: 8, display: 'block', fontVariationSettings: "'FILL' 1" }}>{tip.icon}</span>
+              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--md-sys-color-on-surface)', marginBottom: 4 }}>{tip.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.5 }}>{tip.desc}</div>
             </div>
           ))}
         </div>
