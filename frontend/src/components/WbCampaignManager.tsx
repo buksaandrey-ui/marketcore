@@ -286,7 +286,7 @@ function StatsTab({ accountId }: { accountId: string }) {
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    campaignsApi.overallDrr(accountId, overallDays).then(setOverallDrr).catch(() => {})
+    campaignsApi.overallDrr(accountId, overallDays).then(setOverallDrr).catch(() => { setOverallDrr(null) })
   }, [accountId, overallDays])
 
   async function handlePause(id: number) {
@@ -832,7 +832,7 @@ function AutoSchedulePanel({ accountId }: { accountId: string }) {
   }
 
   const load = useCallback(() => {
-    autoSchedulesApi.list(accountId).then(setConfigs).catch(() => {})
+    autoSchedulesApi.list(accountId).then(setConfigs).catch(() => { setConfigs([]) })
   }, [accountId])
 
   useEffect(() => { load() }, [load])
@@ -1683,7 +1683,7 @@ function ScheduleTab({ accountId }: { accountId: string }) {
         setCampaigns(active)
         setSelectedCamps(new Set(active.map((c: { advert_id: number }) => c.advert_id)))
       })
-      .catch(() => {})
+      .catch(() => { setCampaigns([]); flash('Ошибка загрузки кампаний. Проверьте подключение.', 'error') })
       .finally(() => setLoadingCamps(false))
   }, [accountId])
 

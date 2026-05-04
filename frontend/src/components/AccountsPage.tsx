@@ -272,16 +272,64 @@ export default function AccountsPage() {
       {loading ? (
         <div style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>Загрузка...</div>
       ) : accounts.length === 0 ? (
-        <div style={{
-          background: '#f8fafc', borderRadius: 12, padding: 40, textAlign: 'center',
-          border: '1px dashed #cbd5e1',
-        }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🏪</div>
-          <div style={{ color: '#6b7280', fontSize: 15, marginBottom: 8 }}>Нет подключённых аккаунтов</div>
-          <div style={{ color: '#9ca3af', fontSize: 13 }}>Нажми «Добавить аккаунт» чтобы подключить WB или Ozon</div>
+        <div>
+          {/* Онбординг — пошаговая инструкция */}
+          <div style={{
+            background: 'linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%)',
+            borderRadius: 16, padding: '28px 32px', marginBottom: 24,
+            border: '1px solid #e0e7ff',
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 12 }}>👋 Добро пожаловать!</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: '#1e1b4b', marginBottom: 8 }}>
+              Подключите аккаунт за 3 шага
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12, marginBottom: 20 }}>
+              {[
+                { step: '1', text: 'Получите API-ключ в личном кабинете WB (инструкция ниже)', color: '#6366f1' },
+                { step: '2', text: 'Нажмите «+ Добавить аккаунт» и введите ключ', color: '#8b5cf6' },
+                { step: '3', text: 'Нажмите «⟳ Синхронизировать» — данные загрузятся за 1–2 минуты', color: '#a855f7' },
+              ].map(({ step, text, color }) => (
+                <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: '50%', background: color,
+                    color: '#fff', fontWeight: 700, fontSize: 14,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>{step}</div>
+                  <div style={{ fontSize: 14, color: '#374151' }}>{text}</div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowForm(true)}
+              style={{
+                background: '#6366f1', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '10px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              + Добавить первый аккаунт
+            </button>
+          </div>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 12 }}>
+          {/* Баннер: есть аккаунты без синхронизации */}
+          {accounts.some(a => !a.last_sync_at) && (
+            <div style={{
+              background: '#fffbeb', border: '1px solid #fcd34d',
+              borderRadius: 10, padding: '14px 18px',
+              display: 'flex', alignItems: 'center', gap: 14,
+            }}>
+              <span style={{ fontSize: 24 }}>📡</span>
+              <div>
+                <div style={{ fontWeight: 600, color: '#78350f', fontSize: 14 }}>
+                  Аккаунт добавлен — нажмите «Синхронизировать»
+                </div>
+                <div style={{ color: '#92400e', fontSize: 12, marginTop: 2 }}>
+                  Данные загрузятся за 1–2 минуты. После этого откроется аналитика на Дашборде.
+                </div>
+              </div>
+            </div>
+          )}
           {accounts.map(acc => (
             <div key={acc.id} style={{
               background: '#fff', borderRadius: 12, padding: 20,
