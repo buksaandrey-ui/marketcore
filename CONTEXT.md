@@ -255,7 +255,24 @@ url = f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/info
 
 ---
 
-## Последние изменения (2026-04-28)
+## Последние изменения (2026-05-04)
+
+### Оптимизация и подготовка к релизу (2026-05-03 / 2026-05-04)
+
+- ✅ `analytics/formulas.py` — единый модуль бизнес-формул (drr, real_drr, buyer_paid)
+- ✅ `cache/policies.py` — TTL-константы в одном месте (1h кампании, 24h sku_names)
+- ✅ `accounts.py` — инкрементальный sync через `last_sync_at` + разбит на функции
+- ✅ `analytics.py` — Pydantic response_model для всех GET + DRR через formulas.py
+- ✅ `campaigns.py` — cache-first для stats + OverallDrrOut с каноническими именами
+- ✅ `scheduler.py` — автозапуск стратегий каждые 15 мин + кэши campaign_names (1ч) / sku_names (24ч)
+- ✅ api.ts — drr_ad → drr_to_revenue, drr_total → drr_all_costs, убран buyout_sum
+- ✅ **Блокер 1**: Dashboard и BehaviorPage — убраны demo.ts / makeDemoMatrix()
+- ✅ **Блокер 2**: Навигация сокращена с 9 до 6 разделов (убраны UnitEcon, ScheduleGrid, BotHistoryPage)
+- ✅ **Блокер 3**: Стратегия «2 пика» — боевой режим работает (убран хардкод dry_run=True)
+- ✅ **Блокер 4**: Онбординг-баннер при первом входе без аккаунта
+- ✅ **Важно 4**: Убраны тихие .catch(() => {}) в WbCampaignManager
+
+### Прежние изменения (2026-04-28)
 
 - ✅ Формула выручки: `totalPrice` → `finishedPrice` во всём приложении
 - ✅ Убраны коэффициенты `×0.88` и `×0.05` из аналитики
