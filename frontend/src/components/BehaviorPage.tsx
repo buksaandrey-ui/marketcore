@@ -4,23 +4,8 @@ import { analyticsApi, type HeatmapData } from '../api'
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 
-// Демо-матрица (пока нет реальных данных)
-function makeDemoMatrix(): number[][] {
-  const m = Array.from({ length: 7 }, () => Array(24).fill(0))
-  const peaks = [
-    [0, 10, 35], [0, 13, 42], [0, 20, 28],
-    [1, 11, 38], [1, 14, 45], [1, 21, 31],
-    [4, 10, 25], [4, 15, 33], [5, 12, 55], [5, 14, 62],
-    [6, 11, 48], [6, 13, 57],
-  ]
-  peaks.forEach(([d, h, v]) => { m[d][h] = v })
-  for (let d = 0; d < 7; d++) {
-    for (let h = 8; h < 22; h++) {
-      if (!m[d][h]) m[d][h] = Math.max(0, Math.round(Math.random() * 20 - 3))
-    }
-  }
-  return m
-}
+// makeDemoMatrix() удалён (I-01) — больше нет случайных фейковых данных
+const EMPTY_MATRIX = Array.from({ length: 7 }, () => Array(24).fill(0))
 
 function heatColor(value: number, max: number): string {
   if (max === 0 || value === 0) return '#f1f5f9'
@@ -40,13 +25,13 @@ export function BehaviorPage() {
     setLoading(true)
     analyticsApi.heatmap(days)
       .then(setData)
-      .catch(() => setData({ has_data: false, matrix: makeDemoMatrix(), max_val: 62 }))
+      .catch(() => setData({ has_data: false, matrix: EMPTY_MATRIX, max_val: 0 }))
       .finally(() => setLoading(false))
   }, [days])
 
-  const matrix = data?.matrix ?? makeDemoMatrix()
-  const maxVal = data?.max_val ?? 62
-  const isDemo = !data?.has_data
+  const hasData = data?.has_data === true
+  const matrix  = hasData ? (data?.matrix ?? EMPTY_MATRIX) : EMPTY_MATRIX
+  const maxVal  = hasData ? (data?.max_val ?? 0) : 0
 
   return (
     <div style={{ padding: '24px 28px 48px', maxWidth: 1200, margin: '0 auto' }}>
@@ -59,9 +44,9 @@ export function BehaviorPage() {
         </p>
       </div>
 
-      {isDemo && (
-        <div style={{ background: '#1e3a5f', border: '1px solid #38bdf8', borderRadius: 10, padding: '10px 16px', marginBottom: 20, fontSize: 13, color: '#7dd3fc' }}>
-          📊 Демо-данные. Подключи аккаунт и синхронизируй заказы в разделе 🏪 Аккаунты — появится реальная тепловая карта.
+      {!loading && !hasData && (
+        <div style={{ background: '#1e3a5f', border: '1px solid #38bdf8', borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: 13, color: '#7dd3fc' }}>
+          📡 Нет данных за выбранный период. Подключи аккаунт и синхронизируй заказы в разделе <strong>🏪 Аккаунты</strong> — появится реальная тепловая карта.
         </div>
       )}
 
@@ -142,8 +127,8 @@ export function BehaviorPage() {
         </div>
       )}
 
-      {/* Инсайты под картой */}
-      {!loading && (
+      {/* Инсайты под картой — только при реальных данных */}
+      {!loading && hasData && (
         <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
           {[
             { icon: '🕙', title: 'Пик активности', desc: 'Суббота и воскресенье 12–15 часов — максимум заказов', color: '#ef4444' },

@@ -2210,10 +2210,51 @@ function StrategyTab({ accountId }: { accountId: string }) {
         </div>
 
         <div style={{ marginTop: 14 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.text, cursor: 'pointer' }}>
-            <input type="checkbox" checked={formDryRun} onChange={e => setFormDryRun(e.target.checked)} style={{ width: 16, height: 16 }} />
-            <span><b>Тестовый режим (dry-run)</b> — рассчитывать ставки, но <b>не применять</b> их</span>
-          </label>
+          <div style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>Режим работы</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => setFormDryRun(true)}
+              style={{
+                flex: 1, padding: '10px 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+                border: formDryRun ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                background: formDryRun ? '#fffbeb' : '#f8fafc',
+                color: formDryRun ? '#92400e' : C.textMuted,
+                fontWeight: formDryRun ? 700 : 400,
+                textAlign: 'left' as const,
+              }}
+            >
+              🟡 <b>Тестовый (dry-run)</b><br/>
+              <span style={{ fontSize: 11, fontWeight: 400 }}>Рассчитывает ставки, но НЕ применяет. Безопасно для проверки.</span>
+            </button>
+            <button
+              onClick={() => {
+                if (!formDryRun) return
+                const ok = window.confirm(
+                  '⚠️ Переключаетесь в БОЕВОЙ режим!\n\n' +
+                  'Стратегия будет автоматически менять ставки CPM каждые 15 минут.\n\n' +
+                  'Убедитесь что настройки верны: cpm_min, cpm_cap, ДРР-порог.\n\n' +
+                  'Нажмите OK чтобы включить боевой режим.'
+                )
+                if (ok) setFormDryRun(false)
+              }}
+              style={{
+                flex: 1, padding: '10px 12px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+                border: !formDryRun ? '2px solid #10b981' : '1px solid #e2e8f0',
+                background: !formDryRun ? '#ecfdf5' : '#f8fafc',
+                color: !formDryRun ? '#065f46' : C.textMuted,
+                fontWeight: !formDryRun ? 700 : 400,
+                textAlign: 'left' as const,
+              }}
+            >
+              🟢 <b>Боевой (live)</b><br/>
+              <span style={{ fontSize: 11, fontWeight: 400 }}>Реально меняет CPM каждые 15 мин через WB API.</span>
+            </button>
+          </div>
+          {!formDryRun && (
+            <div style={{ marginTop: 8, padding: '8px 12px', background: '#ecfdf5', borderRadius: 6, fontSize: 12, color: '#065f46', border: '1px solid #6ee7b7' }}>
+              ✅ Боевой режим активен — стратегия будет автоматически менять ставки каждые 15 минут.
+            </div>
+          )}
         </div>
 
         {/* Подсказка о ставках */}

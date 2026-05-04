@@ -348,7 +348,9 @@ async def run_strategy_now(
 ):
     """
     Немедленно запускает расчёт ставки для кампании.
-    Всегда в dry_run режиме (безопасно для ручного теста).
+    Режим (dry_run / боевой) берётся из настроек стратегии.
+    В dry_run=True — только логирует, ставку НЕ применяет.
+    В dry_run=False — применяет ставку через WB Advert API.
     """
     from marketcore.strategy.two_peaks.strategy import TwoPeaksStrategy
 
@@ -365,7 +367,7 @@ async def run_strategy_now(
         min_stock=s.min_stock,
         budget_warning_pct=s.budget_warning_pct,
         budget_stop_pct=s.budget_stop_pct,
-        dry_run=True,  # всегда dry_run при ручном запуске
+        dry_run=s.dry_run,   # берём из настроек стратегии, не хардкодим True
         use_history=s.use_history,
         history_min_days=s.history_min_days,
     )

@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from marketcore.bidding.executor import evaluate_schedule
 from marketcore.database import AsyncSessionLocal
-from marketcore.models import Account, CampaignAutoSchedule, RuleExecution, Schedule
+from marketcore.models import Account, CampaignAutoSchedule, CampaignStrategy, RuleExecution, Schedule
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +240,74 @@ async def refresh_sku_names_cache() -> None:
         logger.info("[cache.sku_names] обогащено %d записей по %d аккаунтам", total, len(accounts))
 
 
+async def run_active_strategies() -> None:
+    """Каждые 15 минут запускает все включённые стратегии «2 пика».
+
+    - Обходит все CampaignStrategy где enabled=True
+    - Запускает TwoPeaksStrategy.execute()
+    - dry_run берётся из настроек самой стратегии
+    - При ошибке одной кампании — продолжает остальные
+    """
+    from marketcore.strategy.two_peaks.strategy import TwoPeaksStrategy
+    from marketcore.strategy.models import CampaignStrategyConfig
+    from marketcore.accounts.encryption import decrypt_api_key
+    from marketcore.ingestor.wb_client import WBClient
+
+    async with _session_factory() as session:
+        rows = list(
+            (await session.execute(
+                select(CampaignStrategy).where(CampaignStrategy.enabled == True)  # noqa: E712
+            )).scalars().all()
+        )
+        if not rows:
+            return
+
+        logger.info("[strategies] запуск %d активных стратегий", len(rows))
+        ok = 0
+        for s in rows:
+            try:
+                acc = (await session.execute(
+                    select(Account).where(Account.id == s.account_id)
+                )).scalar_one_or_none()
+                if not acc:
+                    logger.warning("[strategies] аккаунт %s не найден", s.account_id)
+                    continue
+
+                advert_key = (
+                    decrypt_api_key(acc.advert_api_key_cipher)
+                    if acc.advert_api_key_cipher
+                    else decrypt_api_key(acc.api_key_cipher)
+                )
+                wb_client = WBClient(advert_key)
+                config = CampaignStrategyConfig(
+                    campaign_id=s.campaign_id,
+                    account_id=str(s.account_id),
+                    category=s.category,
+                    cpm_min=s.cpm_min,
+                    cpm_cap=s.cpm_cap,
+                    drr_threshold_pct=s.drr_threshold_pct,
+                    min_stock=s.min_stock,
+                    budget_warning_pct=s.budget_warning_pct,
+                    budget_stop_pct=s.budget_stop_pct,
+                    dry_run=s.dry_run,
+                    use_history=s.use_history,
+                    history_min_days=s.history_min_days,
+                )
+                strategy = TwoPeaksStrategy(config=config, wb_client=wb_client, db=session)
+                result = await strategy.execute()
+                mode = "dry_run" if result.dry_run else "LIVE"
+                logger.info(
+                    "[strategies] кампания %s: cpm=%d → %d (%s) applied=%s skip=%s",
+                    s.campaign_id, result.cpm_prev, result.cpm_target,
+                    mode, result.applied, result.skip_reason,
+                )
+                ok += 1
+            except Exception as exc:
+                logger.warning("[strategies] кампания %s: %s", s.campaign_id, exc)
+
+        logger.info("[strategies] завершено %d/%d стратегий", ok, len(rows))
+
+
 async def apply_week_schedules(is_weekend: bool) -> None:
     """Пятница 22:00 UTC → weekend_hours; Понедельник 06:00 UTC → weekday_hours."""
     label = "выходные" if is_weekend else "будни"
@@ -306,6 +374,15 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Стратегия «2 пика»: каждые 15 минут для всех включённых стратегий
+    _scheduler.add_job(
+        run_active_strategies,
+        CronTrigger(minute="0,15,30,45"),
+        id="strategy_tick",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # Пятница 22:00 UTC → включить выходное расписание
     _scheduler.add_job(
         lambda: apply_week_schedules(True),
@@ -343,7 +420,7 @@ def start_scheduler() -> None:
     _scheduler.start()
     logger.info(
         "[scheduler] APScheduler запущен "
-        "(bidding 15мин | авто-расписание пт/пн | campaign_names 1ч | sku_names 24ч)"
+        "(bidding 15мин | strategies 15мин | авто-расписание пт/пн | campaign_names 1ч | sku_names 24ч)"
     )
 
 

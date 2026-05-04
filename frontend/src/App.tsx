@@ -1,28 +1,27 @@
 import { useState } from 'react'
-import { Dashboard }           from './components/Dashboard'
-import { UnitEcon }            from './components/UnitEcon'
-import { SupplyForecast }      from './components/SupplyForecast'
-import { WbCampaignManager }   from './components/WbCampaignManager'
-import { ScheduleGrid }        from './components/ScheduleGrid'
-import { LoginPage }           from './components/LoginPage'
-import AccountsPage            from './components/AccountsPage'
-import { BehaviorPage }        from './components/BehaviorPage'
-import { ReportsPage }         from './components/ReportsPage'
-import { BotHistoryPage }      from './components/BotHistoryPage'
+import { Dashboard }         from './components/Dashboard'
+import { SupplyForecast }    from './components/SupplyForecast'
+import { WbCampaignManager } from './components/WbCampaignManager'
+import { LoginPage }         from './components/LoginPage'
+import AccountsPage          from './components/AccountsPage'
+import { BehaviorPage }      from './components/BehaviorPage'
+import { ReportsPage }       from './components/ReportsPage'
+// UnitEcon, ScheduleGrid, BotHistoryPage убраны из навигации (demo / дублирует / устарел)
 import './App.css'
 
-type Page = 'dashboard' | 'unit-econ' | 'supply' | 'bidding' | 'schedule' | 'bot-history' | 'accounts' | 'behavior' | 'reports'
+// Убраны из навигации:
+// - 'unit-econ'   → 100% демо-данные, реального API нет
+// - 'schedule'    → дублирует вкладку «Расписание» в Кампаниях WB
+// - 'bot-history' → показывал старый DSL-биддинг (всегда пустая таблица)
+type Page = 'dashboard' | 'supply' | 'bidding' | 'accounts' | 'behavior' | 'reports'
 
 const NAV: { id: Page; icon: string; label: string }[] = [
-  { id: 'dashboard',   icon: '📊', label: 'Дашборд'        },
-  { id: 'unit-econ',   icon: '📐', label: 'Юнит-экономика' },
-  { id: 'supply',      icon: '📦', label: 'Поставки'       },
-  { id: 'bidding',     icon: '📣', label: 'Кампании WB'    },
-  { id: 'schedule',    icon: '🕐', label: 'Ставки'         },
-  { id: 'bot-history', icon: '🤖', label: 'История бота'   },
-  { id: 'behavior',    icon: '📈', label: 'Поведение'      },
-  { id: 'reports',     icon: '📋', label: 'Отчёты'         },
-  { id: 'accounts',    icon: '🏪', label: 'Аккаунты'       },
+  { id: 'dashboard', icon: '📊', label: 'Дашборд'     },
+  { id: 'supply',    icon: '📦', label: 'Поставки'    },
+  { id: 'reports',   icon: '📋', label: 'Отчёты'      },
+  { id: 'bidding',   icon: '📣', label: 'Кампании WB' },
+  { id: 'behavior',  icon: '📈', label: 'Поведение'   },
+  { id: 'accounts',  icon: '🏪', label: 'Аккаунты'    },
 ]
 
 export default function App() {
@@ -30,6 +29,10 @@ export default function App() {
     Boolean(localStorage.getItem('mc_token'))
   )
   const [page, setPage] = useState<Page>('dashboard')
+
+  const navigate = (p: string) => {
+    if (NAV.some(n => n.id === p)) setPage(p as Page)
+  }
 
   const handleLogin  = () => setIsLoggedIn(true)
   const handleLogout = () => {
@@ -64,15 +67,12 @@ export default function App() {
       </header>
 
       <main className="app-main">
-        {page === 'dashboard'   && <Dashboard />}
-        {page === 'unit-econ'   && <UnitEcon />}
-        {page === 'supply'      && <SupplyForecast />}
-        {page === 'bot-history' && <BotHistoryPage />}
-        {page === 'behavior'    && <BehaviorPage />}
-        {page === 'reports'     && <ReportsPage />}
-        {page === 'accounts'    && <AccountsPage />}
-        {page === 'bidding'     && <WbCampaignManager />}
-        {page === 'schedule'    && <ScheduleGrid />}
+        {page === 'dashboard' && <Dashboard onNavigate={navigate} />}
+        {page === 'supply'    && <SupplyForecast />}
+        {page === 'reports'   && <ReportsPage />}
+        {page === 'accounts'  && <AccountsPage />}
+        {page === 'behavior'  && <BehaviorPage />}
+        {page === 'bidding'   && <WbCampaignManager />}
       </main>
     </div>
   )
