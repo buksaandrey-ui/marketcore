@@ -344,6 +344,11 @@ async def get_campaign_stats(
         status_map = {aid: info.get("status") for aid, info in cached_names.items()}
         type_map   = {aid: info.get("type")   for aid, info in cached_names.items()}
         name_map   = {aid: info["name"]        for aid, info in cached_names.items()}
+        # Восстанавливаем список кампаний из кэша (нужен ниже для "нулевых" кампаний)
+        campaigns  = [
+            {"advert_id": aid, "name": info["name"], "status": info.get("status"), "type": info.get("type")}
+            for aid, info in cached_names.items()
+        ]
     else:
         # Кэш пустой — идём в WB API и сразу сохраняем результат
         try:

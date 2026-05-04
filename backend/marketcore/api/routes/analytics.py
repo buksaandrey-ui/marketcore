@@ -488,7 +488,14 @@ async def get_payouts(
     accounts = list(accounts_result.scalars().all())
     wb_accounts = [a for a in accounts if a.marketplace == "wb"]
     if not wb_accounts:
-        return {"has_data": False, "payout_sum": 0.0}
+        return {
+            "has_data": False,
+            "payout_sum": 0.0,
+            "period_from": "",
+            "period_to": "",
+            "api_error": "Нет аккаунтов WB",
+            "note": "",
+        }
 
     df, dt = _period_range(period, date_from_str, date_to_str)
     # Для отображения периода используем запрошенные даты, но данные тянем за 90 дней

@@ -369,7 +369,7 @@ export function ScheduleGrid() {
     }
     setCampaignsLoading(true)
     setCampaignsError(null)
-    accountsApi.campaigns(selectedAccountId)
+    campaignsApi.list(selectedAccountId)
       .then((list) => { setCampaigns(list); setCampaignsLoading(false) })
       .catch((err) => {
         const msg: string = err?.message ?? String(err)

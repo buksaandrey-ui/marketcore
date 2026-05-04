@@ -211,8 +211,6 @@ export const accountsApi = {
   sync: (id: string): Promise<{ status: string; synced: Record<string, number> }> =>
     apiFetch(`/accounts/${id}/sync`, { method: 'POST' }),
 
-  campaigns: (id: string): Promise<WbCampaign[]> =>
-    apiFetch<WbCampaign[]>(`/accounts/${id}/campaigns`),
 }
 
 export type HeatmapData = {

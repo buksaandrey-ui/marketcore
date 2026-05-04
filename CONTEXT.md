@@ -257,6 +257,23 @@ url = f"https://basket-{basket:02d}.wbbasket.ru/vol{vol}/part{part}/{nm_id}/info
 
 ## Последние изменения (2026-05-04)
 
+### Сквозной аудит и исправление критических багов (2026-05-04)
+
+- ✅ **КРИТИЧНО** `campaigns.py:get_campaign_stats()` — `NameError: campaigns not defined` при cache-hit
+  - В ветке `if cached_names:` переменная `campaigns` не объявлялась, а использовалась ниже
+  - Исправлено: добавлена реконструкция `campaigns` из `cached_names`
+- ✅ **КРИТИЧНО** `analytics.py:get_payouts()` — ранний `return` без обязательных полей `PayoutsResponse`
+  - Pydantic-модель требует `period_from`, `period_to`, `api_error`, `note` — ранний выход их не возвращал
+  - Исправлено: добавлены все обязательные поля (`period_from=""`, `period_to=""`, `api_error="Нет аккаунтов WB"`, `note=""`)
+- ✅ **api.ts** — удалён мёртвый метод `accountsApi.campaigns()` (вёл на `/accounts/${id}/campaigns` — эндпоинт не существовал)
+- ✅ **ScheduleGrid.tsx** — исправлен вызов: `accountsApi.campaigns()` → `campaignsApi.list()` (правильный живой эндпоинт)
+- ✅ **Bug 4 (НЕ баг)**: Отменённые заказы — `save_orders_wb()` в `ingestor/db.py` уже фильтрует `isCancel=True` при сохранении, дополнительная фильтрация в аналитике не нужна
+
+### Подтверждено через аудит
+
+- `ingestor/db.py`: отменённые заказы (`isCancel=True`) исключаются при сохранении (строка 82)
+- `analytics.py`: cancelled orders не могут попасть в аналитику — фильтрация на уровне ingestion
+
 ### Оптимизация и подготовка к релизу (2026-05-03 / 2026-05-04)
 
 - ✅ `analytics/formulas.py` — единый модуль бизнес-формул (drr, real_drr, buyer_paid)
