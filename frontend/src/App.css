@@ -480,36 +480,52 @@
   background: var(--md-sys-color-secondary-container);
 }
 
-/* ── Ozon theme overrides ─────────────────────────────────────────────────── */
+/* ── Ozon theme — полный набор цветовых переменных ───────────────────────── */
+/*    Генерируется из seed-цвета #005BFF (Ozon Blue) по MD3                  */
+
 :root {
   --md-sys-color-ozon-primary: #005BFF;
-  --md-sys-color-ozon-on-primary: #FFFFFF;
 }
 
-[data-marketplace="ozon"] .app-rail {
-  background: #001A66;
-}
-[data-marketplace="ozon"] .app-rail-logo {
-  background: #005BFF;
-}
-[data-marketplace="ozon"] .rail-item.active .rail-item-indicator {
-  background: rgba(0, 91, 255, 0.18);
-}
-[data-marketplace="ozon"] .rail-item.active .rail-item-indicator .material-symbols-outlined {
-  color: #005BFF;
-}
-[data-marketplace="ozon"] .rail-item.active .rail-item-label {
-  color: #005BFF;
-}
-[data-marketplace="ozon"] .bottom-nav-item.active .bottom-nav-indicator {
-  background: rgba(0, 91, 255, 0.18);
-}
-[data-marketplace="ozon"] .bottom-nav-item.active .material-symbols-outlined {
-  color: #005BFF;
-}
-[data-marketplace="ozon"] .bottom-nav-item.active .bottom-nav-label {
-  color: #005BFF;
-}
-[data-marketplace="ozon"] .user-avatar-btn {
-  background: #005BFF;
+[data-marketplace="ozon"] {
+  /* ── Primary (Ozon Blue) ── */
+  --md-sys-color-primary:                    #005BFF;
+  --md-sys-color-on-primary:                 #FFFFFF;
+  --md-sys-color-primary-container:          #CCE0FF;
+  --md-sys-color-on-primary-container:       #001A4E;
+
+  /* ── Secondary (стальной синий) ── */
+  --md-sys-color-secondary:                  #4A6ACD;
+  --md-sys-color-on-secondary:               #FFFFFF;
+  --md-sys-color-secondary-container:        #D8E3FF;
+  --md-sys-color-on-secondary-container:     #001849;
+
+  /* ── Tertiary (лазурный) ── */
+  --md-sys-color-tertiary:                   #006799;
+  --md-sys-color-on-tertiary:                #FFFFFF;
+  --md-sys-color-tertiary-container:         #C3E8FF;
+  --md-sys-color-on-tertiary-container:      #001E30;
+
+  /* ── Поверхности — слабый голубой тинт ── */
+  --md-sys-color-background:                 #FAFBFF;
+  --md-sys-color-on-background:              #1A1C22;
+  --md-sys-color-surface:                    #FAFBFF;
+  --md-sys-color-on-surface:                 #1A1C22;
+  --md-sys-color-surface-variant:            #DCE3F5;
+  --md-sys-color-on-surface-variant:         #414C6B;
+  --md-sys-color-surface-tint:               #005BFF;
+  --md-sys-color-inverse-surface:            #2E3040;
+  --md-sys-color-inverse-on-surface:         #F0F2FF;
+  --md-sys-color-inverse-primary:            #ADC6FF;
+
+  /* ── Контейнеры поверхностей (сайдбар, карточки, поля) ── */
+  --md-sys-color-surface-container-lowest:   #FFFFFF;
+  --md-sys-color-surface-container-low:      #EEF2FF;   /* сайдбар — светло-голубой */
+  --md-sys-color-surface-container:          #E7ECFF;   /* карточки */
+  --md-sys-color-surface-container-high:     #E0E6FF;   /* поля ввода, чипы */
+  --md-sys-color-surface-container-highest:  #D8E1FF;
+
+  /* ── Контуры ── */
+  --md-sys-color-outline:                    #717AAA;
+  --md-sys-color-outline-variant:            #BEC6DF;
 }
