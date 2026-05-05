@@ -347,7 +347,14 @@ async def auto_sync_all_accounts() -> None:
                 account_id_str = str(acc.id)
 
                 if acc.marketplace == "wb":
-                    await _sync_wb(session, acc, account_id_str, api_key, since, date_str_from, date_str_to)
+                    # Для выкупов — если таблица пустая, берём 90 дней
+                    from marketcore.models import Sale
+                    from sqlalchemy import func as _func, select as _select
+                    sales_cnt = (await session.execute(
+                        _select(_func.count()).select_from(Sale).where(Sale.account_id == acc.id)
+                    )).scalar_one()
+                    sales_since = (now - timedelta(days=90)) if sales_cnt == 0 else since
+                    await _sync_wb(session, acc, account_id_str, api_key, since, sales_since, date_str_from, date_str_to)
                 else:
                     await _sync_ozon(acc, account_id_str, api_key, since, date_str_from, date_str_to)
 

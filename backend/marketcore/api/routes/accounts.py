@@ -9,7 +9,8 @@ from marketcore.accounts.encryption import decrypt_api_key
 from marketcore.api.schemas.accounts import AccountCreate, AccountResponse
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import User
+from marketcore.models import Sale, User
+from sqlalchemy import func, select
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -93,9 +94,17 @@ async def sync_account(
     date_str_from = ad_since.strftime("%Y-%m-%d")
     date_str_to   = now.strftime("%Y-%m-%d")
 
+    # Для выкупов (sales) — если таблица пустая для этого аккаунта,
+    # тянем 90 дней истории (как первый синк заказов).
+    # Это нужно при первом запуске после добавления фичи выкупов.
+    sales_count = (await db.execute(
+        select(func.count()).select_from(Sale).where(Sale.account_id == account.id)
+    )).scalar_one()
+    sales_since = (now - timedelta(days=90)) if sales_count == 0 else since
+
     try:
         if account.marketplace == "wb":
-            results = await _sync_wb(db, account, account_id_str, api_key, since, date_str_from, date_str_to)
+            results = await _sync_wb(db, account, account_id_str, api_key, since, sales_since, date_str_from, date_str_to)
         else:
             results = await _sync_ozon(account, account_id_str, api_key, since, date_str_from, date_str_to)
     except Exception as e:
@@ -114,6 +123,7 @@ async def _sync_wb(
     account_id_str: str,
     api_key: str,
     since: datetime,
+    sales_since: datetime,
     date_str_from: str,
     date_str_to: str,
 ) -> dict:
@@ -129,7 +139,7 @@ async def _sync_wb(
     client = WBClient(api_key)
 
     results["orders"] = await _sync_orders(client.get_orders, save_orders_wb, account_id_str, since)
-    results["sales"]  = await _sync_orders(client.get_sales,  save_sales_wb,  account_id_str, since)
+    results["sales"]  = await _sync_orders(client.get_sales,  save_sales_wb,  account_id_str, sales_since)
     stocks = await _sync_stocks(client.get_stocks, save_stocks_wb, account_id_str, since)
     results["stocks"] = stocks["count"]
     results["sku_names_stocks"] = await _safe(save_sku_names_from_stocks, account_id_str, stocks["raw"])
