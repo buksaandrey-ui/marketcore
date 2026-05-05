@@ -45,6 +45,22 @@ class WBClient:
             resp.raise_for_status()
             return resp.json() or []
 
+    async def get_sales(self, date_from: datetime) -> list[dict]:
+        """Выкупы и возвраты — /api/v1/supplier/sales.
+
+        saleID начинается с "S" — продажа (покупатель получил товар),
+        saleID начинается с "R" — возврат (покупатель вернул товар).
+        flag=0: возвращает все записи с момента dateFrom.
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{WB_STAT_BASE}/api/v1/supplier/sales",
+                headers=self._headers,
+                params={"dateFrom": date_from.strftime("%Y-%m-%dT%H:%M:%S"), "flag": 0},
+            )
+            resp.raise_for_status()
+            return resp.json() or []
+
     async def get_stocks(self, date_from: datetime) -> list[dict]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(

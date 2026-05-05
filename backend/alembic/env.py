@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
 from marketcore.database import Base
-from marketcore.models import Session, User, Schedule  # noqa: F401 — нужно чтобы Alembic видел модели
+from marketcore.models import Account, AdStat, Order, Sale, Session, SkuName, SkuPrice, SkuStock, User, Schedule  # noqa: F401 — нужно чтобы Alembic видел модели
 
 config = context.config
 if config.config_file_name is not None:

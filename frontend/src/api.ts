@@ -173,6 +173,10 @@ export type DashboardSummary = {
   drr_to_payouts?: number | null
   payout_sum?: number | null
   top_skus?: { sku: string; name: string; orders_count: number; revenue: number }[]
+  // Выкупы (из WB Sales API /api/v1/supplier/sales)
+  sales_count?: number | null    // кол-во выкупов без возвратов
+  sales_revenue?: number | null  // выручка по выкупам (что заплатили покупатели)
+  returns_count?: number | null  // кол-во возвратов за период
 }
 
 export type SupplyForecastData = {

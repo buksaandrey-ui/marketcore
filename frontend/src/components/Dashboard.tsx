@@ -116,6 +116,16 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
       ? adSpend / payouts.payout_sum * 100
       : null
 
+  // Данные по выкупам (из WB Sales API)
+  const salesCount    = realData?.sales_count   ?? null
+  const salesRevenue  = realData?.sales_revenue ?? null
+  const returnsCount  = realData?.returns_count ?? null
+  const hasSalesData  = salesCount !== null
+
+  // В режиме "Выкупы" показываем sales_count, иначе orders_count
+  const displayCount   = metricMode === 'shks' && hasSalesData ? salesCount! : ordersCount
+  const displayRevenue = metricMode === 'shks' && hasSalesData ? salesRevenue! : revenue
+
   return (
     <div className="dash">
 
@@ -191,10 +201,15 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
           background: 'var(--md-sys-color-secondary-container)',
           color: 'var(--md-sys-color-on-secondary-container)',
           borderRadius: 'var(--md-sys-shape-corner-medium)',
-          padding: '10px 14px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'center',
+          padding: '10px 14px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'flex-start',
         }}>
-          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>info</span>
-          Режим «Выкупы» показывает заказы, дошедшие до покупателя. Данные из поля <code>shks</code> рекламного API WB. Для полных данных по выкупам синхронизируйте аккаунт.
+          <span className="material-symbols-outlined" style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>info</span>
+          <span>
+            {hasSalesData
+              ? <>Данные по <b>выкупам</b> из WB Sales API (<code>/api/v1/supplier/sales</code>). Заказ → выкуп когда покупатель получил товар. Возвраты вычтены автоматически.</>
+              : <>Данные по выкупам ещё не загружены. Перейдите в <b>Аккаунты</b> и нажмите «Синхронизировать» — это займёт 1-2 минуты.</>
+            }
+          </span>
         </div>
       )}
 
@@ -226,10 +241,18 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
       {/* ── Formula note (only when real data) ──────────────────── */}
       {hasData && (
         <div className="dash-formula-note">
-          <b>Формулы расчёта:</b>{' '}
-          <b>Оплатили покупатели</b> = <code>finishedPrice × (1 − spp/100) × кол-во</code> — цена после СПП, отменённые исключены.{' '}
-          <b>Начислено WB</b> = <code>ppvz_for_pay</code> = Выручка − комиссия − логистика − хранение.
-          WB закрывает расчёты по понедельникам.
+          {metricMode === 'orders' ? (
+            <><b>Формулы расчёта:</b>{' '}
+            <b>Оплатили покупатели</b> = <code>finishedPrice × (1 − spp/100) × кол-во</code> — цена после СПП, отменённые исключены.{' '}
+            <b>Начислено WB</b> = <code>ppvz_for_pay</code> = Выручка − комиссия − логистика − хранение.
+            WB закрывает расчёты по понедельникам.</>
+          ) : (
+            <><b>Режим «Выкупы»:</b>{' '}
+            Источник — <code>/api/v1/supplier/sales</code>.{' '}
+            <b>Выкупы</b> = заказы, которые покупатель получил и не вернул (saleID начинается с «S»).{' '}
+            <b>Возвраты</b> (saleID = «R») вычтены из счётчика автоматически.
+            Выручка = <code>finishedPrice × (1 − spp/100)</code> по каждому выкупу.</>
+          )}
         </div>
       )}
 
@@ -243,7 +266,7 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
       {(hasData || (realData && loading)) && (
         <div className="kpi-row">
 
-          {/* Orders / Shks */}
+          {/* Orders / Sales count */}
           <div className="kpi-card">
             <div className="kpi-top">
               <div className="kpi-icon-wrap">
@@ -252,12 +275,17 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
                 </span>
               </div>
               <span className="kpi-label">
-                {metricMode === 'orders' ? 'Заказы' : 'Выкупы (shks)'}
+                {metricMode === 'orders' ? 'Заказы' : 'Выкупы'}
               </span>
             </div>
-            <div className="kpi-value">{fmt(ordersCount)} <span className="kpi-unit">шт</span></div>
+            <div className="kpi-value">{fmt(displayCount)} <span className="kpi-unit">шт</span></div>
             <div className="kpi-sub">
-              {metricMode === 'orders' ? 'всего оформлено за период' : 'из рекл. статистики WB · shks'}
+              {metricMode === 'orders'
+                ? 'оформлено за период'
+                : hasSalesData
+                  ? `выкуплено · возвратов: ${returnsCount ?? 0}`
+                  : 'нет данных — синхронизируйте аккаунт'
+              }
             </div>
           </div>
 
@@ -267,11 +295,13 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
               <div className="kpi-icon-wrap">
                 <span className="material-symbols-outlined">payments</span>
               </div>
-              <span className="kpi-label">Оплатили покупатели</span>
+              <span className="kpi-label">
+                {metricMode === 'orders' ? 'Оплатили покупатели' : 'Выручка по выкупам'}
+              </span>
             </div>
-            <div className="kpi-value">₽ {fmt(revenue)}</div>
-            <div className="kpi-sub" title="finishedPrice × (1 − spp/100) × количество">
-              finishedPrice · с учётом СПП ℹ
+            <div className="kpi-value">₽ {fmt(displayRevenue)}</div>
+            <div className="kpi-sub" title={metricMode === 'orders' ? 'finishedPrice × (1 − spp/100) × количество' : 'Сумма по выкупленным товарам без возвратов'}>
+              {metricMode === 'orders' ? 'finishedPrice · с учётом СПП ℹ' : 'по факту выкупа · без возвратов ℹ'}
             </div>
           </div>
 

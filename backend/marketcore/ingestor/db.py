@@ -13,7 +13,7 @@ from marketcore.analytics.districts import (
     wb_warehouse_district,
 )
 from marketcore.config import settings
-from marketcore.models import Account, AdStat, Order, SkuName, SkuPrice, SkuStock
+from marketcore.models import Account, AdStat, Order, Sale, SkuName, SkuPrice, SkuStock
 
 _engine = create_async_engine(settings.database_url)
 _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
@@ -128,6 +128,71 @@ async def save_orders_ozon(account_id: str, raw_postings: list[dict]) -> int:
     async with _session_factory() as session:
         stmt = insert(Order).values(rows).on_conflict_do_nothing(
             constraint="uq_orders_account_external"
+        )
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount
+
+
+async def save_sales_wb(account_id: str, raw_sales: list[dict]) -> int:
+    """Сохраняет выкупы и возвраты из WB Sales API.
+
+    WB обновляет записи о продажах ретроактивно (аналогично рекламной статистике).
+    Используем DELETE+INSERT за тот же диапазон дат, чтобы захватывать обновления.
+
+    saleID начинается с "S" → is_return=False (выкуп).
+    saleID начинается с "R" → is_return=True  (возврат).
+    """
+    now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
+    rows = []
+    for s in raw_sales:
+        sale_id = str(s.get("saleID", ""))
+        if not sale_id:
+            continue
+        is_return = sale_id.upper().startswith("R")
+
+        # Цена покупателя: finishedPrice × (1 − spp/100)
+        spp = float(s.get("spp") or 0)
+        spp_mult = (1 - spp / 100) if spp > 0 else 1.0
+        fp = s.get("finishedPrice") or s.get("priceWithDisc") or 0
+        price_buyer = round(float(fp) * spp_mult, 2)
+
+        # Цена к перечислению продавцу
+        price_seller = round(float(s.get("forPay") or 0), 2)
+
+        rows.append({
+            "id":               uuid.uuid4(),
+            "account_id":       acc_uuid,
+            "external_id":      sale_id,
+            "sku":              str(s.get("nmId", "")),
+            "quantity":         int(s.get("quantity", 1)),
+            "price_buyer":      price_buyer,
+            "price_seller":     price_seller,
+            "is_return":        is_return,
+            "warehouse":        str(s.get("warehouseName", "")) or None,
+            "customer_district": normalize_district(
+                s.get("oblastOkrugName") or s.get("regionName")
+            ),
+            "sold_at": _parse_dt(s.get("date", now.isoformat())),
+        })
+
+    if not rows:
+        return 0
+
+    # WB обновляет записи задним числом — DELETE+INSERT за диапазон
+    min_date = min(r["sold_at"] for r in rows)
+    max_date = max(r["sold_at"] for r in rows)
+
+    async with _session_factory() as session:
+        await session.execute(
+            delete(Sale)
+            .where(Sale.account_id == acc_uuid)
+            .where(Sale.sold_at >= min_date)
+            .where(Sale.sold_at <= max_date)
+        )
+        stmt = insert(Sale).values(rows).on_conflict_do_nothing(
+            constraint="uq_sales_account_external"
         )
         result = await session.execute(stmt)
         await session.commit()

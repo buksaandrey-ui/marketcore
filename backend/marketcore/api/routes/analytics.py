@@ -16,7 +16,7 @@ from marketcore.analytics.formulas import (
 from marketcore.analytics.localization import LIZone, LocalizationService
 from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
-from marketcore.models import Account, AdStat, Order, SkuName, SkuStock, User
+from marketcore.models import Account, AdStat, Order, Sale, SkuName, SkuStock, User
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -49,6 +49,10 @@ class DashboardResponse(BaseModel):
     drr_to_payouts: float | None = None
     payout_sum: float | None = None
     top_skus: list[TopSkuItem] = []
+    # Выкупы (фактические продажи из WB Sales API)
+    sales_count: int | None = None         # кол-во выкупов (без возвратов)
+    sales_revenue: float | None = None     # выручка по выкупам (что заплатили покупатели)
+    returns_count: int | None = None       # кол-во возвратов за период
 
 
 class WarehouseRow(BaseModel):
@@ -256,6 +260,23 @@ async def get_dashboard_summary(
     # Это реальная сумма которую заплатили покупатели (с учётом СПП)
     revenue = orders_sum
 
+    # Выкупы (фактические продажи из /api/v1/supplier/sales, без возвратов)
+    sales_row = (await db.execute(
+        select(
+            func.count(Sale.id).filter(Sale.is_return == False).label("sales_cnt"),        # noqa: E712
+            func.count(Sale.id).filter(Sale.is_return == True).label("returns_cnt"),       # noqa: E712
+            func.coalesce(
+                func.sum(Sale.price_buyer).filter(Sale.is_return == False), 0              # noqa: E712
+            ).label("sales_revenue"),
+        ).where(Sale.account_id.in_(account_ids), Sale.sold_at >= date_from, Sale.sold_at <= date_to)
+    )).one()
+
+    sales_count   = int(sales_row.sales_cnt)
+    returns_count = int(sales_row.returns_cnt)
+    sales_revenue = float(sales_row.sales_revenue)
+    # Флаг: данные по выкупам уже есть в БД
+    has_sales_data = sales_count > 0 or returns_count > 0
+
     # ДРР к начислениям WB — единое место расчёта (за 90 дней, не зависит от UI-периода)
     wb_accounts = [a for a in accounts if a.marketplace == "wb"]
     payout_sum, payout_ok = await _fetch_payouts_90d(wb_accounts)
@@ -277,6 +298,10 @@ async def get_dashboard_summary(
         "drr_to_payouts": calc_drr_payouts,
         "payout_sum": round(payout_sum, 2) if payout_ok else None,
         "top_skus": [{"sku": r.sku, "name": sku_names.get(r.sku, ""), "orders_count": r.cnt, "revenue": float(r.revenue)} for r in stock_rows],
+        # Выкупы
+        "sales_count":   sales_count   if has_sales_data else None,
+        "sales_revenue": round(sales_revenue, 2) if has_sales_data else None,
+        "returns_count": returns_count if has_sales_data else None,
     }
 
 

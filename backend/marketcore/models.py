@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint, func  # noqa: F401
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -91,6 +91,33 @@ class Order(Base):
     __table_args__ = (
         PrimaryKeyConstraint("id", "ordered_at"),
         UniqueConstraint("account_id", "external_id", "ordered_at", name="uq_orders_account_external"),
+    )
+
+
+class Sale(Base):
+    """Выкупы (фактические продажи) — отдельно от заказов.
+
+    WB Sales API /api/v1/supplier/sales:
+      saleID начинается с "S" = продажа, с "R" = возврат.
+    Поле is_return=True означает возврат (вычитается из выкупов).
+    """
+    __tablename__ = "sales"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)   # saleID из WB
+    sku: Mapped[str] = mapped_column(String(255), nullable=False)            # nmId
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    price_buyer: Mapped[float] = mapped_column(Float, nullable=False)        # что заплатил покупатель (finishedPrice × (1-spp))
+    price_seller: Mapped[float] = mapped_column(Float, nullable=False)       # forPay — сумма к перечислению продавцу
+    is_return: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # True если saleID начинается с "R"
+    warehouse: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_district: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    sold_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", "sold_at"),
+        UniqueConstraint("account_id", "external_id", "sold_at", name="uq_sales_account_external"),
     )
 
 

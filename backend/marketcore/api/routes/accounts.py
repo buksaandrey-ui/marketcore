@@ -117,10 +117,11 @@ async def _sync_wb(
     date_str_from: str,
     date_str_to: str,
 ) -> dict:
-    """Синхронизация WB-аккаунта: заказы, остатки, цены, реклама, имена."""
+    """Синхронизация WB-аккаунта: заказы, выкупы, остатки, цены, реклама, имена."""
     from marketcore.ingestor.db import (
         enrich_sku_names_with_params, save_ad_stats_wb, save_orders_wb,
-        save_prices_wb, save_sku_names, save_sku_names_from_stocks, save_stocks_wb,
+        save_prices_wb, save_sales_wb, save_sku_names, save_sku_names_from_stocks,
+        save_stocks_wb,
     )
     from marketcore.ingestor.wb_client import WBClient
 
@@ -128,6 +129,7 @@ async def _sync_wb(
     client = WBClient(api_key)
 
     results["orders"] = await _sync_orders(client.get_orders, save_orders_wb, account_id_str, since)
+    results["sales"]  = await _sync_orders(client.get_sales,  save_sales_wb,  account_id_str, since)
     stocks = await _sync_stocks(client.get_stocks, save_stocks_wb, account_id_str, since)
     results["stocks"] = stocks["count"]
     results["sku_names_stocks"] = await _safe(save_sku_names_from_stocks, account_id_str, stocks["raw"])
