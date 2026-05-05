@@ -162,7 +162,9 @@
 /* ── Main content area ────────────────────────────────────────────────────── */
 .app-main {
   flex: 1;
-  margin-left: 80px;  /* offset for rail */
+  min-width: 0;          /* не даёт flex-item'у расширяться за пределы родителя */
+  overflow-x: hidden;    /* обрезает горизонтальный выход за границы */
+  margin-left: 80px;     /* offset for rail */
   min-height: 100svh;
   display: flex;
   flex-direction: column;

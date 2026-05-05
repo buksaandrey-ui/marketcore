@@ -10,6 +10,8 @@
   max-width: 1440px;
   margin: 0 auto;
   width: 100%;
+  box-sizing: border-box;  /* padding не выходит за width */
+  min-width: 0;
 }
 @media (max-width: 600px) { .dash { padding: 16px 12px 32px; gap: 16px; } }
 
