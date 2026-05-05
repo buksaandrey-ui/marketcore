@@ -85,9 +85,12 @@ async def sync_account(
     if account.last_sync_at:
         since = account.last_sync_at - timedelta(hours=24)
     else:
-        since = now - timedelta(days=30)
+        since = now - timedelta(days=90)   # первый синк — 90 дней истории
 
-    date_str_from = since.strftime("%Y-%m-%d")
+    # WB обновляет рекламную статистику ретроактивно до 14 дней.
+    # Для заказов смотрим с since (инкремент), для рекламы — всегда 14 дней назад.
+    ad_since = now - timedelta(days=14)
+    date_str_from = ad_since.strftime("%Y-%m-%d")
     date_str_to   = now.strftime("%Y-%m-%d")
 
     try:

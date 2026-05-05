@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -308,6 +308,61 @@ async def run_active_strategies() -> None:
         logger.info("[strategies] завершено %d/%d стратегий", ok, len(rows))
 
 
+async def auto_sync_all_accounts() -> None:
+    """Каждые 15 минут автоматически синхронизирует все активные аккаунты.
+
+    Синхронизирует: заказы, остатки, цены, рекламную статистику (14 дней).
+    При ошибке одного аккаунта — продолжает остальные.
+    Обновляет last_sync_at только при успехе.
+    """
+    from marketcore.accounts.encryption import decrypt_api_key
+    from marketcore.api.routes.accounts import _sync_wb, _sync_ozon
+
+    logger.info("[auto_sync] запуск автосинка всех активных аккаунтов")
+    async with _session_factory() as session:
+        accounts = list(
+            (await session.execute(
+                select(Account).where(Account.status == "active")
+            )).scalars().all()
+        )
+        if not accounts:
+            logger.info("[auto_sync] нет активных аккаунтов")
+            return
+
+        now = datetime.now(tz=timezone.utc)
+        synced = 0
+        for acc in accounts:
+            try:
+                api_key = decrypt_api_key(acc.api_key_cipher)
+                # Инкрементальность: только новые данные с момента последнего синка
+                if acc.last_sync_at:
+                    since = acc.last_sync_at - timedelta(hours=24)
+                else:
+                    since = now - timedelta(days=90)
+
+                # Для рекламы всегда берём 14 дней (WB обновляет ретроактивно)
+                ad_since = now - timedelta(days=14)
+                date_str_from = ad_since.strftime("%Y-%m-%d")
+                date_str_to   = now.strftime("%Y-%m-%d")
+                account_id_str = str(acc.id)
+
+                if acc.marketplace == "wb":
+                    await _sync_wb(session, acc, account_id_str, api_key, since, date_str_from, date_str_to)
+                else:
+                    await _sync_ozon(acc, account_id_str, api_key, since, date_str_from, date_str_to)
+
+                acc.status = "active"
+                acc.last_sync_at = now
+                synced += 1
+                logger.info("[auto_sync] аккаунт %s (%s) синхронизирован", acc.name, acc.marketplace)
+            except Exception as exc:
+                logger.warning("[auto_sync] аккаунт %s: %s", acc.id, exc)
+
+        if synced:
+            await session.commit()
+        logger.info("[auto_sync] завершено: %d/%d аккаунтов", synced, len(accounts))
+
+
 async def apply_week_schedules(is_weekend: bool) -> None:
     """Пятница 22:00 UTC → weekend_hours; Понедельник 06:00 UTC → weekday_hours."""
     label = "выходные" if is_weekend else "будни"
@@ -366,6 +421,15 @@ def start_scheduler() -> None:
     if _scheduler is not None:
         return
     _scheduler = AsyncIOScheduler(timezone="UTC")
+    # Автоматическая синхронизация всех активных аккаунтов: каждые 15 минут
+    _scheduler.add_job(
+        auto_sync_all_accounts,
+        CronTrigger(minute="5,20,35,50"),   # смещены от стратегий чтобы не конкурировать
+        id="auto_sync_accounts",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.add_job(
         tick_bidding_schedules,
         CronTrigger(minute="0,15,30,45"),
@@ -420,7 +484,7 @@ def start_scheduler() -> None:
     _scheduler.start()
     logger.info(
         "[scheduler] APScheduler запущен "
-        "(bidding 15мин | strategies 15мин | авто-расписание пт/пн | campaign_names 1ч | sku_names 24ч)"
+        "(auto_sync 15мин | bidding 15мин | strategies 15мин | авто-расписание пт/пн | campaign_names 1ч | sku_names 24ч)"
     )
 
 

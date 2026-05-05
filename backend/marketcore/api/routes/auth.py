@@ -9,7 +9,9 @@ from marketcore.api.schemas.auth import (
     UserResponse,
 )
 from marketcore.auth import service
+from marketcore.auth.dependencies import get_current_user
 from marketcore.database import get_db
+from marketcore.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -44,3 +46,9 @@ async def refresh(body: RefreshTokenRequest, db: AsyncSession = Depends(get_db))
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(body: RefreshTokenRequest, db: AsyncSession = Depends(get_db)) -> None:
     await service.logout_user(db, body.refresh_token)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)) -> UserResponse:
+    """Данные текущего авторизованного пользователя (email, дата регистрации)."""
+    return UserResponse.model_validate(current_user)

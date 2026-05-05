@@ -66,7 +66,11 @@ function StatusChip({ status }: { status: string }) {
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────
-export default function AccountsPage() {
+interface AccountsPageProps {
+  onAccountsChange?: (list: Account[], active?: Account) => void
+}
+
+export default function AccountsPage({ onAccountsChange }: AccountsPageProps = {}) {
   const [accounts, setAccounts]       = useState<Account[]>([])
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState('')
@@ -83,7 +87,11 @@ export default function AccountsPage() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    try { setAccounts(await accountsApi.list()) }
+    try {
+      const list = await accountsApi.list()
+      setAccounts(list)
+      onAccountsChange?.(list)
+    }
     catch { setError('Не удалось загрузить аккаунты') }
     finally { setLoading(false) }
   }
@@ -91,10 +99,13 @@ export default function AccountsPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault(); setError('')
     try {
-      await accountsApi.create(form)
+      const newAccount = await accountsApi.create(form)
       setForm({ marketplace: 'wb', name: '', seller_id: '', api_key: '', advert_api_key: '' })
       setShowForm(false)
-      await load()
+      const list = await accountsApi.list()
+      setAccounts(list)
+      // Уведомляем родителя: передаём новый аккаунт как активный
+      onAccountsChange?.(list, newAccount)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Ошибка создания')
     }

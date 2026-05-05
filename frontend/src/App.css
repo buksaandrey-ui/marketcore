@@ -344,3 +344,172 @@
   from { opacity: 0; transform: translateX(-50%) translateY(16px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0);    }
 }
+
+/* ── Account switcher bar (shown above page content) ─────────────────────── */
+.app-acct-bar {
+  padding: 8px 20px 0;
+  display: flex;
+  align-items: center;
+}
+
+/* ── AccountSwitcher dropdown ─────────────────────────────────────────────── */
+.acct-switcher {
+  display: inline-flex;
+  align-items: center;
+}
+
+.acct-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 10px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-high);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  transition: background 0.15s;
+  max-width: 200px;
+}
+.acct-switcher-btn:hover {
+  background: var(--md-sys-color-surface-container-highest);
+}
+.acct-switcher-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.acct-switcher-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  background: var(--md-sys-color-surface-container);
+  border-radius: var(--md-sys-shape-corner-medium);
+  box-shadow: var(--md-sys-elevation-level2);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.acct-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--md-sys-shape-corner-small);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface);
+  text-align: left;
+  transition: background 0.12s;
+}
+.acct-menu-item:hover,
+.acct-menu-item.active {
+  background: var(--md-sys-color-secondary-container);
+}
+
+/* ── UserAvatar & profile menu ────────────────────────────────────────────── */
+.user-avatar-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s;
+}
+.user-avatar-btn:hover { opacity: 0.85; }
+
+.user-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 200px;
+  background: var(--md-sys-color-surface-container);
+  border-radius: var(--md-sys-shape-corner-medium);
+  box-shadow: var(--md-sys-elevation-level2);
+  padding: 6px;
+}
+
+.user-menu-email {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  padding: 8px 10px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-divider {
+  height: 1px;
+  background: var(--md-sys-color-outline-variant);
+  margin: 4px 0;
+}
+
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--md-sys-shape-corner-small);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface);
+  transition: background 0.12s;
+}
+.user-menu-item:hover {
+  background: var(--md-sys-color-secondary-container);
+}
+
+/* ── Ozon theme overrides ─────────────────────────────────────────────────── */
+:root {
+  --md-sys-color-ozon-primary: #005BFF;
+  --md-sys-color-ozon-on-primary: #FFFFFF;
+}
+
+[data-marketplace="ozon"] .app-rail {
+  background: #001A66;
+}
+[data-marketplace="ozon"] .app-rail-logo {
+  background: #005BFF;
+}
+[data-marketplace="ozon"] .rail-item.active .rail-item-indicator {
+  background: rgba(0, 91, 255, 0.18);
+}
+[data-marketplace="ozon"] .rail-item.active .rail-item-indicator .material-symbols-outlined {
+  color: #005BFF;
+}
+[data-marketplace="ozon"] .rail-item.active .rail-item-label {
+  color: #005BFF;
+}
+[data-marketplace="ozon"] .bottom-nav-item.active .bottom-nav-indicator {
+  background: rgba(0, 91, 255, 0.18);
+}
+[data-marketplace="ozon"] .bottom-nav-item.active .material-symbols-outlined {
+  color: #005BFF;
+}
+[data-marketplace="ozon"] .bottom-nav-item.active .bottom-nav-label {
+  color: #005BFF;
+}
+[data-marketplace="ozon"] .user-avatar-btn {
+  background: #005BFF;
+}

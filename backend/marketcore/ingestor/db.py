@@ -262,6 +262,7 @@ async def save_sku_names_from_stocks(account_id: str, raw_stocks: list[dict]) ->
 
 async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:
     now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
     rows = []
     for campaign in raw_stats:
         campaign_id = str(campaign.get("advertId", ""))
@@ -271,7 +272,7 @@ async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:
                 for nm in (app.get("nms") or app.get("nm") or []):
                     rows.append({
                         "id": uuid.uuid4(),
-                        "account_id": uuid.UUID(account_id),
+                        "account_id": acc_uuid,
                         "campaign_id": campaign_id,
                         "sku": str(nm.get("nmId", "")),
                         "cpm": float(nm.get("cpm", 0)),
@@ -282,11 +283,21 @@ async def save_ad_stats_wb(account_id: str, raw_stats: list[dict]) -> int:
                     })
     if not rows:
         return 0
+
+    # WB обновляет статистику ретроактивно до 14 дней.
+    # Паттерн: DELETE за тот же диапазон дат + INSERT свежих данных.
+    # on_conflict_do_nothing НЕЛЬЗЯ использовать — оставляет устаревшие цифры.
+    min_date = min(r["stat_date"] for r in rows)
+    max_date = max(r["stat_date"] for r in rows)
+
     async with _session_factory() as session:
-        stmt = insert(AdStat).values(rows).on_conflict_do_nothing(
-            constraint="uq_ad_stats_unique"
+        await session.execute(
+            delete(AdStat)
+            .where(AdStat.account_id == acc_uuid)
+            .where(AdStat.stat_date >= min_date)
+            .where(AdStat.stat_date <= max_date)
         )
-        result = await session.execute(stmt)
+        result = await session.execute(insert(AdStat).values(rows))
         await session.commit()
         return result.rowcount
 
@@ -320,11 +331,12 @@ async def save_sku_names(account_id: str, raw_stats: list[dict]) -> int:
 
 async def save_ad_stats_ozon(account_id: str, raw_stats: list[dict]) -> int:
     now = datetime.now(timezone.utc)
+    acc_uuid = uuid.UUID(account_id)
     rows = []
     for stat in raw_stats:
         rows.append({
             "id": uuid.uuid4(),
-            "account_id": uuid.UUID(account_id),
+            "account_id": acc_uuid,
             "campaign_id": str(stat.get("campaign_id", "")),
             "sku": str(stat.get("sku", "")),
             "cpm": float(stat.get("cpm", 0)),
@@ -335,11 +347,17 @@ async def save_ad_stats_ozon(account_id: str, raw_stats: list[dict]) -> int:
         })
     if not rows:
         return 0
+    # DELETE+INSERT: Ozon также обновляет статистику ретроактивно
+    min_date = min(r["stat_date"] for r in rows)
+    max_date = max(r["stat_date"] for r in rows)
     async with _session_factory() as session:
-        stmt = insert(AdStat).values(rows).on_conflict_do_nothing(
-            constraint="uq_ad_stats_unique"
+        await session.execute(
+            delete(AdStat)
+            .where(AdStat.account_id == acc_uuid)
+            .where(AdStat.stat_date >= min_date)
+            .where(AdStat.stat_date <= max_date)
         )
-        result = await session.execute(stmt)
+        result = await session.execute(insert(AdStat).values(rows))
         await session.commit()
         return result.rowcount
 

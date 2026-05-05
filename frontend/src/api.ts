@@ -54,6 +54,9 @@ export const authApi = {
     localStorage.removeItem('mc_token')
     localStorage.removeItem('mc_refresh_token')
   },
+
+  /** Текущий пользователь (email, дата регистрации) */
+  me: (): Promise<UserResponse> => apiFetch<UserResponse>('/auth/me'),
 }
 
 let _refreshing: Promise<boolean> | null = null

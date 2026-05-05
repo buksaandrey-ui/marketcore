@@ -65,7 +65,11 @@ const Td = ({ children, right, style, colSpan }: { children: React.ReactNode; ri
   }}>{children}</td>
 )
 
-export function ReportsPage() {
+interface ReportsPageProps {
+  accountId?: string
+}
+
+export function ReportsPage({ accountId }: ReportsPageProps) {
   const [period, setPeriod]       = useState<Period>('week')
   const [dateFrom, setDateFrom]   = useState('')
   const [dateTo, setDateTo]       = useState('')
@@ -74,12 +78,13 @@ export function ReportsPage() {
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
 
-  function load() {
+  function load(p?: Period) {
+    const activePeriod = p ?? period
     setLoading(true); setError('')
     analyticsApi.report({
-      period,
-      date_from: period === 'custom' ? dateFrom : undefined,
-      date_to:   period === 'custom' ? dateTo   : undefined,
+      period: activePeriod,
+      date_from: activePeriod === 'custom' ? dateFrom : undefined,
+      date_to:   activePeriod === 'custom' ? dateTo   : undefined,
       sku:       skuFilter || undefined,
     })
       .then(setData)
@@ -87,6 +92,8 @@ export function ReportsPage() {
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [period])
+  // Reload when account changes
+  useEffect(() => { load() }, [accountId])
 
   const hasData = data?.has_data === true
   const d = data as Required<SalesReport> | null
@@ -164,7 +171,7 @@ export function ReportsPage() {
               <input type="date" className="md3-field-input" style={{ padding: '7px 10px', minHeight: 36, fontSize: 13, width: 'auto' }}
                 value={dateTo} onChange={e => setDateTo(e.target.value)} />
             </div>
-            <button className="md3-btn md3-btn-tonal md3-ripple" style={{ padding: '7px 16px', minHeight: 36 }} onClick={load}>
+            <button className="md3-btn md3-btn-tonal md3-ripple" style={{ padding: '7px 16px', minHeight: 36 }} onClick={() => load()}>
               Применить
             </button>
           </div>
@@ -182,7 +189,7 @@ export function ReportsPage() {
               onKeyDown={e => e.key === 'Enter' && load()}
               placeholder="Все товары"
             />
-            <button className="md3-btn md3-btn-tonal md3-ripple" style={{ padding: '7px 12px', minHeight: 36 }} onClick={load}>
+            <button className="md3-btn md3-btn-tonal md3-ripple" style={{ padding: '7px 12px', minHeight: 36 }} onClick={() => load()}>
               <span className="material-symbols-outlined" style={{ fontSize: 16 }}>search</span>
             </button>
           </div>

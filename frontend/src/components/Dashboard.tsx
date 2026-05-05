@@ -51,9 +51,19 @@ function OnboardingBanner({ onGoAccounts }: { onGoAccounts?: () => void }) {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
-interface DashboardProps { onNavigate?: (page: string) => void }
+// «Заказы» — что оформили, «Выкупы» — что получили и не вернули (shks из рекл. API).
+// В текущей версии оба режима работают на таблице orders — разница в метрике:
+//   orders → кол-во + выручка по заказам (finishedPrice × (1−spp/100))
+//   shks   → кол-во выкупов из рекламной статистики (поле shks в AdStat)
+//   Полноценный режим "выкупы" потребует синка /api/v1/supplier/sales → будущая версия
+type MetricMode = 'orders' | 'shks'
 
-export function Dashboard({ onNavigate }: DashboardProps) {
+interface DashboardProps {
+  onNavigate?: (page: string) => void
+  accountId?: string
+}
+
+export function Dashboard({ onNavigate, accountId }: DashboardProps) {
   const [realData, setRealData]   = useState<DashboardSummary | null>(null)
   const [payouts,  setPayouts]    = useState<PayoutsData | null>(null)
   const [loading,  setLoading]    = useState(false)
@@ -62,6 +72,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const [period,   setPeriod]     = useState<Period>('month')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo,   setCustomTo]   = useState('')
+  const [metricMode, setMetricMode] = useState<MetricMode>('orders')
 
   const loadData = (p: Period, from?: string, to?: string) => {
     setLoading(true)
@@ -82,7 +93,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       .finally(() => setPayoutsLoading(false))
   }
 
-  useEffect(() => { loadData('month') }, [])
+  useEffect(() => { loadData('month') }, [accountId])
 
   const handlePeriod = (p: Period) => {
     setPeriod(p)
@@ -107,8 +118,9 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   return (
     <div className="dash">
 
-      {/* ── Period selector ─────────────────────────────────────── */}
+      {/* ── Filters row ─────────────────────────────────────────── */}
       <div className="dash-period-row">
+        {/* Период */}
         {(Object.keys(PERIOD_LABELS) as Period[]).map(p => (
           <button
             key={p}
@@ -144,6 +156,26 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             </button>
           </>
         )}
+
+        {/* Разделитель */}
+        <div style={{ flex: 1 }} />
+
+        {/* Переключатель «Заказы / Выкупы» */}
+        <div className="metric-mode-switch" title="Заказы — что оформили. Выкупы — что получили покупатели (нужен дополнительный синк данных WB Sales API).">
+          {(['orders', 'shks'] as MetricMode[]).map(m => (
+            <button
+              key={m}
+              className={`metric-mode-btn md3-ripple${metricMode === m ? ' active' : ''}`}
+              onClick={() => setMetricMode(m)}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
+                {m === 'orders' ? 'shopping_cart' : 'verified'}
+              </span>
+              {m === 'orders' ? 'Заказы' : 'Выкупы'}
+            </button>
+          ))}
+        </div>
+
         {loading && (
           <span style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="material-symbols-outlined" style={{ fontSize: 16, animation: 'spin 1s linear infinite' }}>progress_activity</span>
@@ -151,6 +183,19 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </span>
         )}
       </div>
+
+      {/* Пояснение для режима «Выкупы» */}
+      {metricMode === 'shks' && hasData && (
+        <div style={{
+          background: 'var(--md-sys-color-secondary-container)',
+          color: 'var(--md-sys-color-on-secondary-container)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)',
+          padding: '10px 14px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'center',
+        }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>info</span>
+          Режим «Выкупы» показывает заказы, дошедшие до покупателя. Данные из поля <code>shks</code> рекламного API WB. Для полных данных по выкупам синхронизируйте аккаунт.
+        </div>
+      )}
 
       {/* ── Error banner ────────────────────────────────────────── */}
       {error && (
@@ -197,16 +242,22 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {(hasData || (realData && loading)) && (
         <div className="kpi-row">
 
-          {/* Orders */}
+          {/* Orders / Shks */}
           <div className="kpi-card">
             <div className="kpi-top">
               <div className="kpi-icon-wrap">
-                <span className="material-symbols-outlined">shopping_bag</span>
+                <span className="material-symbols-outlined">
+                  {metricMode === 'orders' ? 'shopping_bag' : 'verified'}
+                </span>
               </div>
-              <span className="kpi-label">Заказы</span>
+              <span className="kpi-label">
+                {metricMode === 'orders' ? 'Заказы' : 'Выкупы (shks)'}
+              </span>
             </div>
             <div className="kpi-value">{fmt(ordersCount)} <span className="kpi-unit">шт</span></div>
-            <div className="kpi-sub">всего оформлено за период</div>
+            <div className="kpi-sub">
+              {metricMode === 'orders' ? 'всего оформлено за период' : 'из рекл. статистики WB · shks'}
+            </div>
           </div>
 
           {/* Revenue (buyer paid) */}
