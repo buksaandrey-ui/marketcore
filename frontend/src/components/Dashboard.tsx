@@ -77,8 +77,9 @@ export function Dashboard({ onNavigate, accountId }: DashboardProps) {
   const loadData = (p: Period, from?: string, to?: string) => {
     setLoading(true)
     setError(null)
-    const params: { period: string; date_from?: string; date_to?: string } = { period: p }
+    const params: { period: string; date_from?: string; date_to?: string; account_id?: string } = { period: p }
     if (p === 'custom' && from && to) { params.date_from = from; params.date_to = to }
+    if (accountId) params.account_id = accountId
 
     analyticsApi.dashboard(params)
       .then(setRealData)

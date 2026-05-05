@@ -172,13 +172,30 @@ async def get_dashboard_summary(
     period: str = Query("custom"),
     date_from_str: str | None = Query(None, alias="date_from"),
     date_to_str: str | None = Query(None, alias="date_to"),
+    account_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    accounts_result = await db.execute(
-        select(Account).where(Account.user_id == current_user.id, Account.status == "active")
-    )
-    accounts = list(accounts_result.scalars().all())
+    # Если передан конкретный account_id — показываем только его данные
+    if account_id:
+        try:
+            target_uuid = uuid.UUID(account_id)
+        except ValueError:
+            return {"has_data": False, "accounts": []}
+        accounts_result = await db.execute(
+            select(Account).where(
+                Account.id == target_uuid,
+                Account.user_id == current_user.id,
+                Account.status == "active",
+            )
+        )
+        accounts = list(accounts_result.scalars().all())
+    else:
+        accounts_result = await db.execute(
+            select(Account).where(Account.user_id == current_user.id, Account.status == "active")
+        )
+        accounts = list(accounts_result.scalars().all())
+
     if not accounts:
         return {"has_data": False, "accounts": []}
 
@@ -360,10 +377,26 @@ async def sales_report(
     date_to_str: str | None = Query(None, alias="date_to"),
     sku: str | None = Query(None),
     category: str | None = Query(None),
+    account_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    account_ids = await _get_user_account_ids(db, current_user.id)
+    if account_id:
+        try:
+            target_uuid = uuid.UUID(account_id)
+            res = await db.execute(
+                select(Account.id).where(
+                    Account.id == target_uuid,
+                    Account.user_id == current_user.id,
+                    Account.status == "active",
+                )
+            )
+            row = res.scalar_one_or_none()
+            account_ids = [row] if row else []
+        except ValueError:
+            account_ids = []
+    else:
+        account_ids = await _get_user_account_ids(db, current_user.id)
     if not account_ids:
         return {"has_data": False}
 
@@ -470,6 +503,7 @@ async def get_payouts(
     period: str = Query("month"),
     date_from_str: str | None = Query(None, alias="date_from"),
     date_to_str: str | None = Query(None, alias="date_to"),
+    account_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
@@ -482,9 +516,24 @@ async def get_payouts(
     from marketcore.accounts.encryption import decrypt_api_key
     from marketcore.ingestor.wb_client import WBClient
 
-    accounts_result = await db.execute(
-        select(Account).where(Account.user_id == current_user.id, Account.status == "active")
-    )
+    if account_id:
+        try:
+            target_uuid = uuid.UUID(account_id)
+            accounts_result = await db.execute(
+                select(Account).where(
+                    Account.id == target_uuid,
+                    Account.user_id == current_user.id,
+                    Account.status == "active",
+                )
+            )
+        except ValueError:
+            accounts_result = await db.execute(
+                select(Account).where(Account.id == None)  # noqa: E711 — пустой результат
+            )
+    else:
+        accounts_result = await db.execute(
+            select(Account).where(Account.user_id == current_user.id, Account.status == "active")
+        )
     accounts = list(accounts_result.scalars().all())
     wb_accounts = [a for a in accounts if a.marketplace == "wb"]
     if not wb_accounts:

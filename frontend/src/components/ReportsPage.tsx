@@ -82,10 +82,11 @@ export function ReportsPage({ accountId }: ReportsPageProps) {
     const activePeriod = p ?? period
     setLoading(true); setError('')
     analyticsApi.report({
-      period: activePeriod,
-      date_from: activePeriod === 'custom' ? dateFrom : undefined,
-      date_to:   activePeriod === 'custom' ? dateTo   : undefined,
-      sku:       skuFilter || undefined,
+      period:     activePeriod,
+      date_from:  activePeriod === 'custom' ? dateFrom : undefined,
+      date_to:    activePeriod === 'custom' ? dateTo   : undefined,
+      sku:        skuFilter || undefined,
+      account_id: accountId || undefined,
     })
       .then(setData)
       .catch(e => setError(e instanceof Error ? e.message : 'Ошибка загрузки'))

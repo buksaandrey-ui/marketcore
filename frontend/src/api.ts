@@ -251,17 +251,19 @@ export type PayoutsData = {
 }
 
 export const analyticsApi = {
-  dashboard: (params: { period: string; date_from?: string; date_to?: string } = { period: 'month' }): Promise<DashboardSummary> => {
+  dashboard: (params: { period: string; date_from?: string; date_to?: string; account_id?: string } = { period: 'month' }): Promise<DashboardSummary> => {
     const q = new URLSearchParams({ period: params.period })
-    if (params.date_from) q.set('date_from', params.date_from)
-    if (params.date_to) q.set('date_to', params.date_to)
+    if (params.date_from)  q.set('date_from',  params.date_from)
+    if (params.date_to)    q.set('date_to',    params.date_to)
+    if (params.account_id) q.set('account_id', params.account_id)
     return apiFetch<DashboardSummary>(`/analytics/dashboard?${q}`)
   },
 
-  payouts: (params: { period: string; date_from?: string; date_to?: string } = { period: 'month' }): Promise<PayoutsData> => {
+  payouts: (params: { period: string; date_from?: string; date_to?: string; account_id?: string } = { period: 'month' }): Promise<PayoutsData> => {
     const q = new URLSearchParams({ period: params.period })
-    if (params.date_from) q.set('date_from', params.date_from)
-    if (params.date_to) q.set('date_to', params.date_to)
+    if (params.date_from)  q.set('date_from',  params.date_from)
+    if (params.date_to)    q.set('date_to',    params.date_to)
+    if (params.account_id) q.set('account_id', params.account_id)
     return apiFetch<PayoutsData>(`/analytics/payouts?${q}`)
   },
 
@@ -271,12 +273,13 @@ export const analyticsApi = {
   heatmap: (days = 30): Promise<HeatmapData> =>
     apiFetch<HeatmapData>(`/analytics/orders/heatmap?days=${days}`),
 
-  report: (params: { period: string; date_from?: string; date_to?: string; sku?: string }): Promise<SalesReport> => {
+  report: (params: { period: string; date_from?: string; date_to?: string; sku?: string; account_id?: string }): Promise<SalesReport> => {
     const q = new URLSearchParams()
     q.set('period', params.period)
-    if (params.date_from) q.set('date_from', params.date_from)
-    if (params.date_to)   q.set('date_to',   params.date_to)
-    if (params.sku)       q.set('sku',        params.sku)
+    if (params.date_from)  q.set('date_from',  params.date_from)
+    if (params.date_to)    q.set('date_to',    params.date_to)
+    if (params.sku)        q.set('sku',        params.sku)
+    if (params.account_id) q.set('account_id', params.account_id)
     return apiFetch<SalesReport>(`/analytics/report?${q}`)
   },
 }
